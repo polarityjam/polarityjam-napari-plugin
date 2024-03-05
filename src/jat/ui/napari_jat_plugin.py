@@ -183,7 +183,11 @@ class JunctionAnnotationWidget(QWidget):
         # run polarityjam for the selected image
         collection = PropertiesCollection()
         extractor = Extractor(self.params_runtime)
-        extractor.extract(img1, params_image1, mask, output_file_prefix1, output_path, collection)
+
+        img = self.access_image()
+        mask = self.access_mask()
+
+        extractor.extract(img, self.params_image, mask, self.output_path_prefix, self.output_path, collection)
 
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
@@ -210,6 +214,17 @@ class JunctionAnnotationWidget(QWidget):
             img = image_data
 
         return img
+
+    def access_mask(self):
+        mask = None
+        for layer in self.viewer.layers:
+            if isinstance(layer, napari.layers.labels.labels.Labels):
+                mask = layer.data
+
+        if mask is None:
+            raise ValueError("No mask found in the viewer!")
+
+        return mask
 
     def add_mask_to_viewer(self, mask):
         self.viewer.add_labels(mask, name="PolarityJam Mask")
