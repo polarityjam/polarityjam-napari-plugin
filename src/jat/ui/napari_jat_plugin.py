@@ -1,14 +1,24 @@
+import napari
+import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
-    QSizePolicy, QHBoxLayout, QFileDialog
+    QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox
 
 from polarityjam import Extractor, PropertiesCollection, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
 
 import os
 class JunctionAnnotationWidget(QWidget):
-    def __init__(self):
+    def __init__(self, napari_viewer):
         super().__init__()
+        self.viewer = napari_viewer
         self.params_image = ImageParameter()
+        # reset
+        self.params_image.channel_junction = -1
+        self.params_image.channel_nucleus = -1
+        self.params_image.channel_organelle = -1
+        self.params_image.channel_expression_marker = -1
+        self.params_image.pixel_to_micron_ratio = 1.0
+
         self.params_runtime = RuntimeParameter()
         self.params_plot = PlotParameter()
         self.params_seg = None
@@ -35,10 +45,13 @@ class JunctionAnnotationWidget(QWidget):
 
             # Run PolarityJam block
             "label_rp": QLabel("run PolarityJam on:"),
+            "param_button": QPushButton("Parameter File"),
+            "segment_button": QPushButton("Segment Image"),
             "run_button": QPushButton("Run PolarityJam"),
+
+            # Junction labeling block
             "label_jc": QLabel("Junction Class"),
             "dropdown_labeling": QComboBox(),
-            "param_button": QPushButton("Parameter File"),
 
             # Output block
             "label_output": QLabel("Output parameters:"),
@@ -53,10 +66,11 @@ class JunctionAnnotationWidget(QWidget):
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         # Add items to the dropdown menu
-        self.widgets["dropdown_labeling"].addItems(["Value 1", "Value 2", "Value 3", "Value 4", "Value 5"])
+        self.widgets["dropdown_labeling"].addItems(["straight", "thick", "thick/reticular", "reticular", "fingers"])
 
         # add connections
         self.widgets["param_button"].clicked.connect(self.load_parameter_file)
+        self.widgets["segment_button"].clicked.connect(self.run_segmentation)
         self.widgets["run_button"].clicked.connect(self.run_polarityjam)
 
         # add connections for text changed
@@ -74,13 +88,13 @@ class JunctionAnnotationWidget(QWidget):
         self.params_image.channel_junction = int(self.widgets["channel_junction"].text())
 
     def on_nucleus_text_changed(self):
-        self.params_image.channel_junction = int(self.widgets["channel_nucleus"].text())
+        self.params_image.channel_nucleus = int(self.widgets["channel_nucleus"].text())
 
     def on_organelle_text_changed(self):
-        self.params_image.channel_junction = int(self.widgets["channel_organelle"].text())
+        self.params_image.channel_organelle = int(self.widgets["channel_organelle"].text())
 
     def on_expression_marker_text_changed(self):
-        self.params_image.channel_junction = int(self.widgets["channel_expression_marker"].text())
+        self.params_image.channel_expression_marker = int(self.widgets["channel_expression_marker"].text())
 
     def _build_layout(self):
         # Create block-wise layout
@@ -111,6 +125,7 @@ class JunctionAnnotationWidget(QWidget):
         # Run PolarityJam block
         self.vbox_run_pjam.addWidget(self.widgets["label_rp"])
         self.vbox_run_pjam.addWidget(self.widgets["param_button"])
+        self.vbox_run_pjam.addWidget(self.widgets["segment_button"])
         self.vbox_run_pjam.addWidget(self.widgets["run_button"])
 
         # Junction labeling block
@@ -127,7 +142,7 @@ class JunctionAnnotationWidget(QWidget):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Output Path")
         if dir_path:  # if user didn't cancel the dialog
             self.output_path = dir_path
-            self.widgets["output_path"].setText(f"Output Path: {dir_path}")
+            self.widgets["output_path"].setText(f"{dir_path}")
 
     def on_output_file_prefix_text_changed(self):
         new_text = self.widgets["output_file_prefix"].text()
@@ -139,15 +154,33 @@ class JunctionAnnotationWidget(QWidget):
 
         segmenter, _ = load_segmenter(self.params_runtime, self.params_seg)
 
-        img_channels, _ = segmenter.prepare(img1, params_image1)
-        mask = segmenter.segment(img_channels, input_file1)
+        img1 = self.access_image()
+
+        img_channels, _ = segmenter.prepare(img1, self.params_image)
+        try:
+            mask = segmenter.segment(img_channels)
+        except Exception as e:
+            # show error in pop up
+            self.show_error_dialog(e)
+            mask = None
 
         return mask
 
+    def show_error_dialog(self, message):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setText("An error occurred")
+        msg.setInformativeText(str(message))
+        msg.setWindowTitle("Error")
+        msg.exec_()
+
+    def run_segmentation(self):
+        mask = self.segment_image()
+        if mask is not None:
+            self.add_mask_to_viewer(mask)
+
     def run_polarityjam(self):
         # run polarityjam for the selected image
-        mask = self.segment_image()
-
         collection = PropertiesCollection()
         extractor = Extractor(self.params_runtime)
         extractor.extract(img1, params_image1, mask, output_file_prefix1, output_path, collection)
@@ -161,3 +194,22 @@ class JunctionAnnotationWidget(QWidget):
         self.params_runtime = RuntimeParameter.from_yml(file_path)
         self.params_plot = PlotParameter.from_yml(file_path)
         self.params_seg = SegmentationParameter.from_yml(file_path)
+
+    def access_image(self):
+        image_data = None
+        for layer in self.viewer.layers:
+            if isinstance(layer, napari.layers.image.image.Image):
+                image_data = layer.data
+
+        if image_data is None:
+            raise ValueError("No image found in the viewer!")
+
+        if image_data.shape[0] < min(image_data.shape[1], image_data.shape[2]):
+            img = np.swapaxes(np.swapaxes(image_data, 0, 2), 0, 1)
+        else:
+            img = image_data
+
+        return img
+
+    def add_mask_to_viewer(self, mask):
+        self.viewer.add_labels(mask, name="PolarityJam Mask")
