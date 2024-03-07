@@ -1,12 +1,17 @@
 import napari
 import numpy as np
+import pkg_resources
+
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
-    QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox
+    QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
 
 from polarityjam import Extractor, PropertiesCollection, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
 
 import os
+
+
 class JunctionAnnotationWidget(QWidget):
     def __init__(self, napari_viewer):
         super().__init__()
@@ -38,19 +43,21 @@ class JunctionAnnotationWidget(QWidget):
             "channel_nucleus_label": QLabel("channel_nucleus"),
             "channel_organelle_label": QLabel("channel_organelle"),
             "channel_expression_marker_label": QLabel("channel_expression_marker"),
-            "channel_junction": QLineEdit("-1"),
-            "channel_nucleus": QLineEdit("-1"),
-            "channel_organelle": QLineEdit("-1"),
-            "channel_expression_marker": QLineEdit("-1"),
+            "channel_junction": QSpinBox(),
+            "channel_nucleus": QSpinBox(),
+            "channel_organelle": QSpinBox(),
+            "channel_expression_marker": QSpinBox(),
 
             # Run PolarityJam block
-            "label_rp": QLabel("run PolarityJam on:"),
+            "label_rp": QLabel("Polarity-Jam execution:"),
             "param_button": QPushButton("Parameter File"),
+            "param_file_loaded_indicator": QLabel(),
             "segment_button": QPushButton("Segment Image"),
             "run_button": QPushButton("Run PolarityJam"),
 
             # Junction labeling block
-            "label_jc": QLabel("Junction Class"),
+            "label_jc": QLabel("Junction classification:"),
+            "label_jclass": QLabel("Junction Class"),
             "dropdown_labeling": QComboBox(),
 
             # Output block
@@ -61,9 +68,20 @@ class JunctionAnnotationWidget(QWidget):
             "output_file_prefix": QLineEdit(),
         }
 
+        # Set minimum and maximum values for the QSpinBox widgets
+        for channel in ["channel_junction", "channel_nucleus", "channel_organelle", "channel_expression_marker"]:
+            self.widgets[channel].setMinimum(-1)
+            self.widgets[channel].setMaximum(100)
+            self.widgets[channel].setValue(-1)
+
         # Set size policy of the widgets
         for widget in self.widgets.values():
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        # indicator for parameter file loaded
+        arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
+        self.widgets["param_file_loaded_indicator"].setPixmap(QPixmap(arrow_path))
+        self.widgets["param_file_loaded_indicator"].setVisible(False)
 
         # Add items to the dropdown menu
         self.widgets["dropdown_labeling"].addItems(
@@ -103,7 +121,7 @@ class JunctionAnnotationWidget(QWidget):
         self.vbox_input = QVBoxLayout()
         self.vbox_output = QVBoxLayout()
         self.vbox_run_pjam = QVBoxLayout()
-        self.hbox_junction_labeling = QHBoxLayout()
+        self.vbox_junction_labeling = QVBoxLayout()
 
         # Input block
         self.vbox_input.addWidget(self.widgets["label_input"])
@@ -126,19 +144,25 @@ class JunctionAnnotationWidget(QWidget):
 
         # Run PolarityJam block
         self.vbox_run_pjam.addWidget(self.widgets["label_rp"])
-        self.vbox_run_pjam.addWidget(self.widgets["param_button"])
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["param_button"], 90)
+        hbox.addWidget(self.widgets["param_file_loaded_indicator"], 10)
+        self.vbox_run_pjam.addLayout(hbox)
         self.vbox_run_pjam.addWidget(self.widgets["segment_button"])
         self.vbox_run_pjam.addWidget(self.widgets["run_button"])
 
         # Junction labeling block
-        self.hbox_junction_labeling.addWidget(self.widgets["label_jc"])
-        self.hbox_junction_labeling.addWidget(self.widgets["dropdown_labeling"])
+        self.vbox_junction_labeling.addWidget(self.widgets["label_jc"])
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["label_jclass"])
+        hbox.addWidget(self.widgets["dropdown_labeling"])
+        self.vbox_junction_labeling.addLayout(hbox)
 
         # Add layouts to the overall layout
         self.layout.addLayout(self.vbox_input)
         self.layout.addLayout(self.vbox_output)
         self.layout.addLayout(self.vbox_run_pjam)
-        self.layout.addLayout(self.hbox_junction_labeling)
+        self.layout.addLayout(self.vbox_junction_labeling)
 
     def select_output_path(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Output Path")
@@ -202,6 +226,8 @@ class JunctionAnnotationWidget(QWidget):
         self.params_runtime = RuntimeParameter.from_yml(file_path)
         self.params_plot = PlotParameter.from_yml(file_path)
         self.params_seg = SegmentationParameter.from_yml(file_path)
+
+        self.widgets["param_file_loaded_indicator"].setVisible(True)
 
     def access_image(self):
         image_data = None
