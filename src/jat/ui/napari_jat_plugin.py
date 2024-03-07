@@ -66,7 +66,9 @@ class JunctionAnnotationWidget(QWidget):
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         # Add items to the dropdown menu
-        self.widgets["dropdown_labeling"].addItems(["straight", "thick", "thick/reticular", "reticular", "fingers"])
+        self.widgets["dropdown_labeling"].addItems(
+            ["none", "straight", "thick", "thick/reticular", "reticular", "fingers"]
+        )
 
         # add connections
         self.widgets["param_button"].clicked.connect(self.load_parameter_file)
@@ -175,11 +177,13 @@ class JunctionAnnotationWidget(QWidget):
         msg.exec_()
 
     def run_segmentation(self):
+        # todo: asynchron call
         mask = self.segment_image()
         if mask is not None:
             self.add_mask_to_viewer(mask)
 
     def run_polarityjam(self):
+        # todo: asynchron call
         # run polarityjam for the selected image
         collection = PropertiesCollection()
         extractor = Extractor(self.params_runtime)
