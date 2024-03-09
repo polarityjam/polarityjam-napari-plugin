@@ -1,15 +1,48 @@
+import os
+
 import napari
 import numpy as np
 import pkg_resources
-
+from PyQt5.QtCore import QRunnable, pyqtSlot, pyqtSignal, QObject, QTimer
+from PyQt5.QtCore import QThreadPool
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
     QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
-
 from polarityjam import Extractor, PropertiesCollection, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
 
-import os
+
+class WorkerSignalsSegmentation(QObject):
+    finished = pyqtSignal(np.ndarray)  # Signal that will be emitted when the task finishes
+
+
+class WorkerSignalsExtraction(QObject):
+    finished = pyqtSignal(np.ndarray)  # Signal that will be emitted when the task finishes
+    features_extracted = pyqtSignal(PropertiesCollection)  # Signal that will be emitted when features are extracted
+
+
+class RunSegmentationTask(QRunnable):
+    def __init__(self, widget):
+        super().__init__()
+        self.widget = widget
+        self.signals = WorkerSignalsSegmentation()
+
+    @pyqtSlot()
+    def run(self):
+        mask = self.widget.segment_image()
+        self.signals.finished.emit(mask)
+
+
+class RunPolarityJamTask(QRunnable):
+    def __init__(self, widget):
+        super().__init__()
+        self.widget = widget
+        self.signals = WorkerSignalsExtraction()
+
+    @pyqtSlot()
+    def run(self):
+        collection = self.widget.extract_features()
+        self.signals.features_extracted.emit(collection)
 
 
 class JunctionAnnotationWidget(QWidget):
@@ -30,10 +63,15 @@ class JunctionAnnotationWidget(QWidget):
         self.output_path = os.getcwd()
         self.output_path_prefix = "output"
 
+        self.collection = None
+
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
 
         self.scene = QGraphicsScene()
+
+        self.loading_timer_feature_extraction = QTimer()
+        self.loading_timer_segmentation = QTimer()
 
         # qt objects
         self.widgets = {
@@ -52,6 +90,8 @@ class JunctionAnnotationWidget(QWidget):
             "label_rp": QLabel("Polarity-Jam execution:"),
             "param_button": QPushButton("Parameter File"),
             "param_file_loaded_indicator": QLabel(),
+            "feature_extraction_indicator": QLabel(),
+            "segmentation_indicator": QLabel(),
             "segment_button": QPushButton("Segment Image"),
             "run_button": QPushButton("Run PolarityJam"),
 
@@ -59,6 +99,8 @@ class JunctionAnnotationWidget(QWidget):
             "label_jc": QLabel("Junction classification:"),
             "label_jclass": QLabel("Junction Class"),
             "dropdown_labeling": QComboBox(),
+            "previous_button": QPushButton("Previous"),
+            "next_button": QPushButton("Next"),
 
             # Output block
             "label_output": QLabel("Output parameters:"),
@@ -83,6 +125,13 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["param_file_loaded_indicator"].setPixmap(QPixmap(arrow_path))
         self.widgets["param_file_loaded_indicator"].setVisible(False)
 
+        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
+        self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_path))
+        self.widgets["feature_extraction_indicator"].setVisible(False)
+
+        self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_path))
+        self.widgets["segmentation_indicator"].setVisible(False)
+
         # Add items to the dropdown menu
         self.widgets["dropdown_labeling"].addItems(
             ["none", "straight", "thick", "thick/reticular", "reticular", "fingers"]
@@ -92,6 +141,8 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["param_button"].clicked.connect(self.load_parameter_file)
         self.widgets["segment_button"].clicked.connect(self.run_segmentation)
         self.widgets["run_button"].clicked.connect(self.run_polarityjam)
+        self.widgets["previous_button"].clicked.connect(self.previous_button_clicked)
+        self.widgets["next_button"].clicked.connect(self.next_button_clicked)
 
         # add connections for text changed
         self.widgets["channel_junction"].textChanged.connect(self.on_junction_text_changed)
@@ -101,8 +152,24 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["output_path"].clicked.connect(self.select_output_path)
         self.widgets["output_file_prefix"].textChanged.connect(self.on_output_file_prefix_text_changed)
 
+        # timer connection
+        self.loading_timer_feature_extraction.timeout.connect(self.change_loading_image_feature_extraction)
+        self.loading_timer_segmentation.timeout.connect(self.change_loading_image_segmentation)
+
         # build layout
         self._build_layout()
+
+    def previous_button_clicked(self):
+        # This function will be executed when the "Previous" button is clicked
+        if self.collection is None:
+            # should run polarityjam first
+            return
+
+    def next_button_clicked(self):
+        # This function will be executed when the "Next" button is clicked
+        if self.collection is None:
+            # should run polarityjam first
+            return
 
     def on_junction_text_changed(self):
         self.params_image.channel_junction = int(self.widgets["channel_junction"].text())
@@ -127,8 +194,8 @@ class JunctionAnnotationWidget(QWidget):
         self.vbox_input.addWidget(self.widgets["label_input"])
         for channel in ["channel_junction", "channel_nucleus", "channel_organelle", "channel_expression_marker"]:
             hbox = QHBoxLayout()
-            hbox.addWidget(self.widgets[channel + "_label"])
-            hbox.addWidget(self.widgets[channel])
+            hbox.addWidget(self.widgets[channel + "_label"], 90)
+            hbox.addWidget(self.widgets[channel], 10)
             self.vbox_input.addLayout(hbox)
 
         # Output block
@@ -148,8 +215,14 @@ class JunctionAnnotationWidget(QWidget):
         hbox.addWidget(self.widgets["param_button"], 90)
         hbox.addWidget(self.widgets["param_file_loaded_indicator"], 10)
         self.vbox_run_pjam.addLayout(hbox)
-        self.vbox_run_pjam.addWidget(self.widgets["segment_button"])
-        self.vbox_run_pjam.addWidget(self.widgets["run_button"])
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["segment_button"], 90)
+        hbox.addWidget(self.widgets["segmentation_indicator"], 10)
+        self.vbox_run_pjam.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["run_button"], 90)
+        hbox.addWidget(self.widgets["feature_extraction_indicator"], 10)
+        self.vbox_run_pjam.addLayout(hbox)
 
         # Junction labeling block
         self.vbox_junction_labeling.addWidget(self.widgets["label_jc"])
@@ -157,12 +230,36 @@ class JunctionAnnotationWidget(QWidget):
         hbox.addWidget(self.widgets["label_jclass"])
         hbox.addWidget(self.widgets["dropdown_labeling"])
         self.vbox_junction_labeling.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["previous_button"])
+        hbox.addWidget(self.widgets["next_button"])
+        self.vbox_junction_labeling.addLayout(hbox)
 
         # Add layouts to the overall layout
         self.layout.addLayout(self.vbox_input)
         self.layout.addLayout(self.vbox_output)
         self.layout.addLayout(self.vbox_run_pjam)
         self.layout.addLayout(self.vbox_junction_labeling)
+
+    def change_loading_image_feature_extraction(self):
+        current_pixmap = self.widgets["feature_extraction_indicator"].pixmap()
+        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
+        loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
+
+        if current_pixmap == QPixmap(loading_path):
+            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_v_path))
+        else:
+            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_path))
+
+    def change_loading_image_segmentation(self):
+        current_pixmap = self.widgets["segmentation_indicator"].pixmap()
+        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
+        loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
+
+        if current_pixmap == QPixmap(loading_path):
+            self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_v_path))
+        else:
+            self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_path))
 
     def select_output_path(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Output Path")
@@ -201,14 +298,73 @@ class JunctionAnnotationWidget(QWidget):
         msg.exec_()
 
     def run_segmentation(self):
-        # todo: asynchron call
-        mask = self.segment_image()
+        # Create a QThreadPool instance
+        thread_pool = QThreadPool()
+
+        # Create a RunSegmentationTask instance
+        task = RunSegmentationTask(self)
+
+        # Connect the finished signal to a slot
+        task.finished.connect(self.handle_segmentation_result)
+
+        # Start the task
+        thread_pool.start(task)
+
+        # Set the visibility of segmenation_indicator to True
+        self.widgets["segmenation_indicator"].setVisible(True)
+
+        # start the loading timer
+        self.loading_timer_segmentation.start(2000)
+
+    def handle_segmentation_result(self, mask):
+        # This function will be called when the RunSegmentationTask finishes
+        # The mask parameter will contain the result of the segment_image function
+
+        # stop the loading timer
+        self.loading_timer_segmentation.stop()
+
         if mask is not None:
             self.add_mask_to_viewer(mask)
 
+            # Change the image of feature_extraction_indicator to arrow.svg
+            arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
+            self.widgets["segmentation_indicator"].setPixmap(QPixmap(arrow_path))
+        else:
+            # Set the visibility of segmentation_indicator to False
+            self.widgets["segmentation_indicator"].setVisible(False)
+
     def run_polarityjam(self):
-        # todo: asynchron call
-        # run polarityjam for the selected image
+        # Create a QThreadPool instance
+        thread_pool = QThreadPool()
+
+        # Create a RunPolarityJamTask instance
+        task = RunPolarityJamTask(self)
+
+        # Connect the finished signal to a slot
+        task.finished.connect(self.handle_features_extraction_result)
+
+        # Start the task
+        thread_pool.start(task)
+
+        # Set the visibility of feature_extraction_indicator to True
+        self.widgets["feature_extraction_indicator"].setVisible(True)
+
+        # start the loading timer
+        self.loading_timer_feature_extraction.start(2000)
+
+    def handle_features_extraction_result(self, collection):
+        # This function will be called when the RunPolarityJamTask finishes
+        # The collection parameter will contain the result of the extract_features function
+        self.collection = collection
+
+        # stop the loading timer
+        self.loading_timer_feature_extraction.stop()
+
+        # Change the image of feature_extraction_indicator to arrow.svg
+        arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
+        self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(arrow_path))
+
+    def extract_features(self):
         collection = PropertiesCollection()
         extractor = Extractor(self.params_runtime)
 
@@ -216,6 +372,8 @@ class JunctionAnnotationWidget(QWidget):
         mask = self.access_mask()
 
         extractor.extract(img, self.params_image, mask, self.output_path_prefix, self.output_path, collection)
+
+        return collection
 
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
