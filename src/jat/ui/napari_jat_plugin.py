@@ -51,18 +51,19 @@ class RunSegmentationTask(QRunnable):
             mask = segmenter.segment(img_channels)
         except Exception as e:
             self.signals.error.emit(e)
-            mask = None
+            mask = np.NAN
 
         return mask
 
 
 class RunPolarityJamTask(QRunnable):
-    def __init__(self, img, mask, params_image, output_path_prefix, output_path):
+    def __init__(self, img, mask, params_image, params_runtime, output_path_prefix, output_path):
         super().__init__()
         self.signals = WorkerSignalsExtraction()
         self.img = img
         self.mask = mask
         self.params_image = params_image
+        self.params_runtime = params_runtime
         self.output_path_prefix = output_path_prefix
         self.output_path = output_path
 
@@ -72,7 +73,7 @@ class RunPolarityJamTask(QRunnable):
             collection = self.extract_features()
         except Exception as e:
             self.signals.error.emit(e)
-            collection = None
+            collection = PropertiesCollection()
         self.signals.features_extracted.emit(collection)
 
     def extract_features(self):
@@ -196,6 +197,9 @@ class JunctionAnnotationWidget(QWidget):
         self.loading_timer_segmentation.timeout.connect(self.change_loading_image_segmentation)
         self.segmentation_indicator_state = True
         self.feature_extraction_indicator_state = True
+
+        # other initializations
+        self.cur_index = 0
         # build layout
         self._build_layout()
 
@@ -205,11 +209,60 @@ class JunctionAnnotationWidget(QWidget):
             # should run polarityjam first
             return
 
+        # decrease current index if possible
+        if self.cur_index > 1:
+            self.cur_index -= 1
+        else:
+            return
+
+        # get the current mask for the dataset index
+        cur_label_index = self.collection.dataset.at[self.cur_index, "label"]
+        cur_name = self.collection.dataset.at[self.cur_index, "filename"]
+        biomed_img = self.collection.get_image_by_img_name(cur_name)
+
+        sc_mask = biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(cur_label_index)
+
+        # add the mask to the viewer
+        self.add_mask_to_viewer(sc_mask.data, "sc_mask%d" % self.cur_index)
+
+        # remove the next mask if exists
+        if "sc_mask%d" % (self.cur_index + 1) in self.viewer.layers:
+            self.viewer.layers.pop("sc_mask%d" % (self.cur_index + 1))
+
+        # disable the view on the segmentation mask
+        self.viewer.layers["PolarityJam Mask"].visible = False
+
     def next_button_clicked(self):
         # This function will be executed when the "Next" button is clicked
-        if self.collection is None:
+        if self.collection is None or len(self.collection) == 0:
             # should run polarityjam first
             return
+
+        # increase index if possible
+        self.cur_index += 1
+
+        # check if the index is out of range
+        if self.cur_index > len(self.collection):
+            self.cur_index -= 1
+            return
+
+        # get the current mask for the dataset index
+        cur_label_index = self.collection.dataset.at[self.cur_index, "label"]
+        cur_name = self.collection.dataset.at[self.cur_index, "filename"]
+        biomed_img = self.collection.get_image_by_img_name(cur_name)
+
+        sc_mask = biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(cur_label_index)
+
+        # add the mask to the viewer
+        self.add_mask_to_viewer(sc_mask.data, "sc_mask%d" % self.cur_index)
+
+        # remove the previous mask if exists
+        if self.cur_index > 1:
+            if "sc_mask%d" % (self.cur_index - 1) in self.viewer.layers:
+                self.viewer.layers.pop("sc_mask%d" % (self.cur_index - 1))
+
+        # disable the view on the segmentation mask
+        self.viewer.layers["PolarityJam Mask"].visible = False
 
     def on_junction_text_changed(self):
         self.params_image.channel_junction = int(self.widgets["channel_junction"].text())
@@ -314,6 +367,9 @@ class JunctionAnnotationWidget(QWidget):
         self.output_path_prefix = new_text
 
     def run_segmentation(self):
+        # Disable the button
+        self.widgets["segment_button"].setEnabled(False)
+
         # Create a QThreadPool instance
         thread_pool = QThreadPool().globalInstance()
 
@@ -349,10 +405,13 @@ class JunctionAnnotationWidget(QWidget):
         # This function will be called when the RunSegmentationTask finishes
         # The mask parameter will contain the result of the segment_image function
 
+        # Re-enable the button
+        self.widgets["segment_button"].setEnabled(True)
+
         # stop the loading timer
         self.loading_timer_segmentation.stop()
 
-        if mask is not None:
+        if mask is not np.NAN:
             self.add_mask_to_viewer(mask)
 
             # Change the image of feature_extraction_indicator to arrow.svg
@@ -363,13 +422,17 @@ class JunctionAnnotationWidget(QWidget):
             self.widgets["segmentation_indicator"].setVisible(False)
 
     def run_polarityjam(self):
+        # Re-enable the button
+        self.widgets["run_button"].setEnabled(False)
+
         # Create a QThreadPool instance
         thread_pool = QThreadPool()
 
         # Create a RunPolarityJamTask instance
         img = self.access_image()
         mask = self.access_mask()
-        task = RunPolarityJamTask(self, img, mask, self.params_image, self.output_path_prefix, self.output_path)
+        task = RunPolarityJamTask(img, mask, self.params_image, self.params_runtime, self.output_path_prefix,
+                                  self.output_path)
 
         # connect the features_extracted signal to the handle_features_extraction_result method
         task.signals.features_extracted.connect(self.handle_features_extraction_result)
@@ -389,14 +452,21 @@ class JunctionAnnotationWidget(QWidget):
     def handle_features_extraction_result(self, collection):
         # This function will be called when the RunPolarityJamTask finishes
         # The collection parameter will contain the result of the extract_features function
+        # Re-enable the button
+        self.widgets["run_button"].setEnabled(True)
+
         self.collection = collection
 
         # stop the loading timer
         self.loading_timer_feature_extraction.stop()
 
         # Change the image of feature_extraction_indicator to arrow.svg
-        arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
-        self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(arrow_path))
+        if len(collection) > 0:
+            arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
+            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(arrow_path))
+        else:
+            # Set the visibility of feature_extraction_indicator to False
+            self.widgets["feature_extraction_indicator"].setVisible(False)
 
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
@@ -437,5 +507,5 @@ class JunctionAnnotationWidget(QWidget):
 
         return mask
 
-    def add_mask_to_viewer(self, mask):
-        self.viewer.add_labels(mask, name="PolarityJam Mask")
+    def add_mask_to_viewer(self, mask, name="PolarityJam Mask"):
+        self.viewer.add_labels(mask, name=name)
