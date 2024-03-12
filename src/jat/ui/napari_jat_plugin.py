@@ -14,35 +14,74 @@ from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, 
 
 class WorkerSignalsSegmentation(QObject):
     finished = pyqtSignal(np.ndarray)  # Signal that will be emitted when the task finishes
+    error = pyqtSignal(Exception)
 
 
 class WorkerSignalsExtraction(QObject):
-    finished = pyqtSignal(np.ndarray)  # Signal that will be emitted when the task finishes
     features_extracted = pyqtSignal(PropertiesCollection)  # Signal that will be emitted when features are extracted
+    error = pyqtSignal(Exception)
 
 
 class RunSegmentationTask(QRunnable):
-    def __init__(self, widget):
+    def __init__(self, img, params_seg, params_runtime, params_image):
         super().__init__()
-        self.widget = widget
+        self.img = img
+        self.params_seg = params_seg
+        self.params_runtime = params_runtime
+        self.params_image = params_image
         self.signals = WorkerSignalsSegmentation()
 
     @pyqtSlot()
     def run(self):
-        mask = self.widget.segment_image()
+        try:
+            mask = self.segment_image()
+        except Exception as e:
+            self.signals.error.emit(e)
+
         self.signals.finished.emit(mask)
+
+    def segment_image(self):
+        if self.params_seg is None:
+            self.params_seg = SegmentationParameter(self.params_runtime.segmentation_algorithm)
+
+        segmenter, _ = load_segmenter(self.params_runtime, self.params_seg)
+
+        img_channels, _ = segmenter.prepare(self.img, self.params_image)
+        try:
+            mask = segmenter.segment(img_channels)
+        except Exception as e:
+            self.signals.error.emit(e)
+            mask = None
+
+        return mask
 
 
 class RunPolarityJamTask(QRunnable):
-    def __init__(self, widget):
+    def __init__(self, img, mask, params_image, output_path_prefix, output_path):
         super().__init__()
-        self.widget = widget
         self.signals = WorkerSignalsExtraction()
+        self.img = img
+        self.mask = mask
+        self.params_image = params_image
+        self.output_path_prefix = output_path_prefix
+        self.output_path = output_path
 
     @pyqtSlot()
     def run(self):
-        collection = self.widget.extract_features()
+        try:
+            collection = self.extract_features()
+        except Exception as e:
+            self.signals.error.emit(e)
+            collection = None
         self.signals.features_extracted.emit(collection)
+
+    def extract_features(self):
+        collection = PropertiesCollection()
+        extractor = Extractor(self.params_runtime)
+
+        extractor.extract(self.img, self.params_image, self.mask, self.output_path_prefix, self.output_path, collection)
+
+        return collection
 
 
 class JunctionAnnotationWidget(QWidget):
@@ -271,50 +310,37 @@ class JunctionAnnotationWidget(QWidget):
         new_text = self.widgets["output_file_prefix"].text()
         self.output_path_prefix = new_text
 
-    def segment_image(self):
-        if self.params_seg is None:
-            self.params_seg = SegmentationParameter(self.params_runtime.segmentation_algorithm)
-
-        segmenter, _ = load_segmenter(self.params_runtime, self.params_seg)
-
-        img1 = self.access_image()
-
-        img_channels, _ = segmenter.prepare(img1, self.params_image)
-        try:
-            mask = segmenter.segment(img_channels)
-        except Exception as e:
-            # show error in pop up
-            self.show_error_dialog(e)
-            mask = None
-
-        return mask
-
-    def show_error_dialog(self, message):
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-        msg.setText("An error occurred")
-        msg.setInformativeText(str(message))
-        msg.setWindowTitle("Error")
-        msg.exec_()
-
     def run_segmentation(self):
         # Create a QThreadPool instance
-        thread_pool = QThreadPool()
+        thread_pool = QThreadPool().globalInstance()
 
         # Create a RunSegmentationTask instance
-        task = RunSegmentationTask(self)
+        img = self.access_image()
+        task = RunSegmentationTask(img, self.params_seg, self.params_runtime, self.params_image)
 
-        # Connect the finished signal to a slot
-        task.finished.connect(self.handle_segmentation_result)
+        # Connect the error signal to the handle_error method
+        task.signals.error.connect(self.handle_error)
+
+        # connect the finished signal to the handle_segmentation_result method
+        task.signals.finished.connect(self.handle_segmentation_result)
 
         # Start the task
         thread_pool.start(task)
 
-        # Set the visibility of segmenation_indicator to True
-        self.widgets["segmenation_indicator"].setVisible(True)
+        # Set the visibility of segmentation_indicator to True
+        self.widgets["segmentation_indicator"].setVisible(True)
 
         # start the loading timer
         self.loading_timer_segmentation.start(2000)
+
+    def handle_error(self, e):
+        # This function will be called when an error occurs in the RunSegmentationTask
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setText("An error occurred")
+        msg.setInformativeText(str(e))
+        msg.setWindowTitle("Error")
+        msg.exec_()
 
     def handle_segmentation_result(self, mask):
         # This function will be called when the RunSegmentationTask finishes
@@ -338,10 +364,15 @@ class JunctionAnnotationWidget(QWidget):
         thread_pool = QThreadPool()
 
         # Create a RunPolarityJamTask instance
-        task = RunPolarityJamTask(self)
+        img = self.access_image()
+        mask = self.access_mask()
+        task = RunPolarityJamTask(self, img, mask, self.params_image, self.output_path_prefix, self.output_path)
 
-        # Connect the finished signal to a slot
-        task.finished.connect(self.handle_features_extraction_result)
+        # connect the features_extracted signal to the handle_features_extraction_result method
+        task.signals.features_extracted.connect(self.handle_features_extraction_result)
+
+        # Connect the error signal to the handle_error method
+        task.signals.error.connect(self.handle_error)
 
         # Start the task
         thread_pool.start(task)
@@ -363,17 +394,6 @@ class JunctionAnnotationWidget(QWidget):
         # Change the image of feature_extraction_indicator to arrow.svg
         arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
         self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(arrow_path))
-
-    def extract_features(self):
-        collection = PropertiesCollection()
-        extractor = Extractor(self.params_runtime)
-
-        img = self.access_image()
-        mask = self.access_mask()
-
-        extractor.extract(img, self.params_image, mask, self.output_path_prefix, self.output_path, collection)
-
-        return collection
 
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
