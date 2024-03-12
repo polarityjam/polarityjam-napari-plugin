@@ -194,7 +194,8 @@ class JunctionAnnotationWidget(QWidget):
         # timer connection
         self.loading_timer_feature_extraction.timeout.connect(self.change_loading_image_feature_extraction)
         self.loading_timer_segmentation.timeout.connect(self.change_loading_image_segmentation)
-
+        self.segmentation_indicator_state = True
+        self.feature_extraction_indicator_state = True
         # build layout
         self._build_layout()
 
@@ -281,24 +282,26 @@ class JunctionAnnotationWidget(QWidget):
         self.layout.addLayout(self.vbox_junction_labeling)
 
     def change_loading_image_feature_extraction(self):
-        current_pixmap = self.widgets["feature_extraction_indicator"].pixmap()
         loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
         loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
 
-        if current_pixmap == QPixmap(loading_path):
+        if self.feature_extraction_indicator_state:
             self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_v_path))
         else:
             self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_path))
 
+        self.feature_extraction_indicator_state = not self.feature_extraction_indicator_state
+
     def change_loading_image_segmentation(self):
-        current_pixmap = self.widgets["segmentation_indicator"].pixmap()
         loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
         loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
 
-        if current_pixmap == QPixmap(loading_path):
+        if self.segmentation_indicator_state:
             self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_v_path))
         else:
             self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_path))
+
+        self.segmentation_indicator_state = not self.segmentation_indicator_state
 
     def select_output_path(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Output Path")
