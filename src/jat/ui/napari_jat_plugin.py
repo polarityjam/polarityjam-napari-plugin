@@ -1,7 +1,9 @@
 import os
+from pathlib import Path
 
 import napari
 import numpy as np
+import pandas as pd
 import pkg_resources
 from PyQt5.QtCore import QRunnable, pyqtSlot, pyqtSignal, QObject, QTimer
 from PyQt5.QtCore import QThreadPool
@@ -10,6 +12,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineE
     QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
 from polarityjam import Extractor, PropertiesCollection, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
+from skimage.morphology import binary_dilation
 
 
 class WorkerSignalsSegmentation(QObject):
@@ -141,6 +144,10 @@ class JunctionAnnotationWidget(QWidget):
             "dropdown_labeling": QComboBox(),
             "previous_button": QPushButton("Previous"),
             "next_button": QPushButton("Next"),
+            "thickness_label": QLabel("Thickness:"),
+            "thickness": QSpinBox(),
+            "save_button": QPushButton("Save"),
+            "save_indicator": QLabel(),
 
             # Output block
             "label_output": QLabel("Output parameters:"),
@@ -156,6 +163,11 @@ class JunctionAnnotationWidget(QWidget):
             self.widgets[channel].setMaximum(100)
             self.widgets[channel].setValue(-1)
 
+        # default value for thickness
+        self.widgets["thickness"].setMinimum(1)
+        self.widgets["thickness"].setMaximum(10)
+        self.widgets["thickness"].setValue(1)
+
         # Set size policy of the widgets
         for widget in self.widgets.values():
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -164,6 +176,10 @@ class JunctionAnnotationWidget(QWidget):
         arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
         self.widgets["param_file_loaded_indicator"].setPixmap(QPixmap(arrow_path))
         self.widgets["param_file_loaded_indicator"].setVisible(False)
+
+        # indicator for saving the junction label dataset
+        self.widgets["save_indicator"].setPixmap(QPixmap(arrow_path))
+        self.widgets["save_indicator"].setVisible(False)
 
         loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
         self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_path))
@@ -177,12 +193,15 @@ class JunctionAnnotationWidget(QWidget):
             ["none", "straight", "thick", "thick/reticular", "reticular", "fingers"]
         )
 
+
         # add connections
         self.widgets["param_button"].clicked.connect(self.load_parameter_file)
         self.widgets["segment_button"].clicked.connect(self.run_segmentation)
         self.widgets["run_button"].clicked.connect(self.run_polarityjam)
         self.widgets["previous_button"].clicked.connect(self.previous_button_clicked)
         self.widgets["next_button"].clicked.connect(self.next_button_clicked)
+        self.widgets["dropdown_labeling"].currentIndexChanged.connect(self.on_dropdown_labeling_changed)
+        self.widgets["save_button"].clicked.connect(self.save_dataset)
 
         # add connections for text changed
         self.widgets["channel_junction"].textChanged.connect(self.on_junction_text_changed)
@@ -191,6 +210,7 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["channel_expression_marker"].textChanged.connect(self.on_expression_marker_text_changed)
         self.widgets["output_path"].clicked.connect(self.select_output_path)
         self.widgets["output_file_prefix"].textChanged.connect(self.on_output_file_prefix_text_changed)
+        self.widgets["thickness"].textChanged.connect(self.on_thickness_text_changed)
 
         # timer connection
         self.loading_timer_feature_extraction.timeout.connect(self.change_loading_image_feature_extraction)
@@ -199,13 +219,45 @@ class JunctionAnnotationWidget(QWidget):
         self.feature_extraction_indicator_state = True
 
         # other initializations
-        self.cur_index = 0
+        self.cur_index = -1
+        self.overlap = 1
+        self.biomed_img = None
+        self.neighbors_combination_list = []
+        self._cells_layer_list = []
+        self.junction_label = pd.DataFrame(columns=["label_1", "label_2", "junction_class"])
+
         # build layout
         self._build_layout()
 
+    def on_thickness_text_changed(self):
+        self.overlap = int(self.widgets["thickness"].text())
+
+    def save_dataset(self):
+        # Specify the path and name of the file to save the dataset
+        file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_junction_label.csv")
+        self.junction_label.to_csv(file_path, index=False)
+
+        # toggle visibility of the save indicator
+        self.widgets["save_indicator"].setVisible(True)
+
+    def on_dropdown_labeling_changed(self):
+        # do nothing if no collection is available
+        if self.collection is None or len(self.collection) == 0:
+            return
+
+        # get the selected item from the dropdown menu
+        selected_item = self.widgets["dropdown_labeling"].currentText()
+
+        label, neighbor = self.neighbors_combination_list[self.cur_index]
+
+        # change the junction class in the junction_label dataframe
+        self.junction_label.loc[
+            (self.junction_label["label_1"] == label) & (self.junction_label["label_2"] == neighbor),
+            "junction_class"
+        ] = selected_item
+
     def previous_button_clicked(self):
-        # This function will be executed when the "Previous" button is clicked
-        if self.collection is None:
+        if len(self.neighbors_combination_list) == 0:
             # should run polarityjam first
             return
 
@@ -215,54 +267,91 @@ class JunctionAnnotationWidget(QWidget):
         else:
             return
 
-        # get the current mask for the dataset index
-        cur_label_index = self.collection.dataset.at[self.cur_index, "label"]
-        cur_name = self.collection.dataset.at[self.cur_index, "filename"]
-        biomed_img = self.collection.get_image_by_img_name(cur_name)
+        # reset drop down menu to that of the junction_label dataframe
+        self._reset_junction_box()
 
-        sc_mask = biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(cur_label_index)
+        self._show_single_junction()
 
-        # add the mask to the viewer
-        self.add_mask_to_viewer(sc_mask.data, "sc_mask%d" % self.cur_index)
+    def _get_all_neighbor_combinations(self):
+        if not (self.collection is None or len(self.collection) == 0):
+            self.biomed_img = self._get_biomed_img()
 
-        # remove the next mask if exists
-        if "sc_mask%d" % (self.cur_index + 1) in self.viewer.layers:
-            self.viewer.layers.pop("sc_mask%d" % (self.cur_index + 1))
+            # get all unique neighbor combinations
+            for label in self.biomed_img.segmentation.segmentation_mask_connected.get_labels():
+                neighbors = list(self.biomed_img.segmentation.neighborhood_graph_connected.neighbors(label))
 
-        # disable the view on the segmentation mask
-        self.viewer.layers["PolarityJam Mask"].visible = False
+                for neighbor in neighbors:
+                    if label < neighbor:
+                        self.neighbors_combination_list.append((label, neighbor))
+                        # add default value to the junction_label dataframe
+                        self.junction_label = self.junction_label.append(
+                            {"label_1": label, "label_2": neighbor, "junction_class": "none"}, ignore_index=True
+                        )
 
     def next_button_clicked(self):
-        # This function will be executed when the "Next" button is clicked
-        if self.collection is None or len(self.collection) == 0:
+        if len(self.neighbors_combination_list) == 0:
             # should run polarityjam first
             return
 
         # increase index if possible
-        self.cur_index += 1
-
-        # check if the index is out of range
-        if self.cur_index > len(self.collection):
-            self.cur_index -= 1
+        if self.cur_index < len(self.neighbors_combination_list) - 1:
+            self.cur_index += 1
+        else:
             return
 
-        # get the current mask for the dataset index
-        cur_label_index = self.collection.dataset.at[self.cur_index, "label"]
-        cur_name = self.collection.dataset.at[self.cur_index, "filename"]
-        biomed_img = self.collection.get_image_by_img_name(cur_name)
+        # reset drop down menu to that of the junction_label dataframe
+        self._reset_junction_box()
 
-        sc_mask = biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(cur_label_index)
+        self._show_single_junction()
 
-        # add the mask to the viewer
-        self.add_mask_to_viewer(sc_mask.data, "sc_mask%d" % self.cur_index)
+    def _reset_junction_box(self):
+        label, neighbor = self.neighbors_combination_list[self.cur_index]
+        junction_class = self.junction_label.loc[
+            (self.junction_label["label_1"] == label) & (self.junction_label["label_2"] == neighbor),
+            "junction_class"
+        ].values[0]
+        self.widgets["dropdown_labeling"].setCurrentText(junction_class)
+
+    def _show_single_junction(self):
+        label, neighbor = self.neighbors_combination_list[self.cur_index]
+        sc_mask = self.biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(label)
+        sc_mask_n = self.biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(neighbor)
+
+        # dilate the masks and calculate overlap
+        combined_mask = self.get_sc_junction_mask(sc_mask, sc_mask_n)
+
+        # add the combined mask to the viewer
+        cur_mask_name = "sc_mask%d_%d" % (label, neighbor)
+        self.add_mask_to_viewer(combined_mask.data, cur_mask_name)
+        self._cells_layer_list.append(cur_mask_name)
 
         # remove the previous mask if exists
-        if self.cur_index > 1:
-            if "sc_mask%d" % (self.cur_index - 1) in self.viewer.layers:
-                self.viewer.layers.pop("sc_mask%d" % (self.cur_index - 1))
+        if len(self._cells_layer_list) > 1:
+            _name = self._cells_layer_list.pop(0)  # holds previous mask name
+            if _name in self.viewer.layers:
+                # remove from layers view
+                self.viewer.layers.pop(_name)
 
         # disable the view on the segmentation mask
         self.viewer.layers["PolarityJam Mask"].visible = False
+
+    def _get_biomed_img(self):
+        cur_name = self.collection.dataset.at[1, "filename"]
+        biomed_img = self.collection.get_image_by_img_name(cur_name)
+        return biomed_img
+
+    def get_sc_junction_mask(self, sc_mask, sc_mask_n):
+        sc_mask_d = binary_dilation(sc_mask.data)
+        sc_mask_n_d = binary_dilation(sc_mask_n.data)
+        for i in range(self.overlap - 1):
+            sc_mask_d = binary_dilation(sc_mask_d.data)
+            sc_mask_n_d = binary_dilation(sc_mask_n_d.data)
+        overlap = np.where(np.logical_and(sc_mask_d, sc_mask_n_d))
+        combined_mask = sc_mask.combine(sc_mask_n).to_instance_mask(1)
+        # add overlap mask on top
+        combined_mask.data[overlap] = 2
+
+        return combined_mask
 
     def on_junction_text_changed(self):
         self.params_image.channel_junction = int(self.widgets["channel_junction"].text())
@@ -326,6 +415,14 @@ class JunctionAnnotationWidget(QWidget):
         hbox = QHBoxLayout()
         hbox.addWidget(self.widgets["previous_button"])
         hbox.addWidget(self.widgets["next_button"])
+        self.vbox_junction_labeling.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["thickness_label"])
+        hbox.addWidget(self.widgets["thickness"])
+        self.vbox_junction_labeling.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["save_button"], 90)
+        hbox.addWidget(self.widgets["save_indicator"], 10)
         self.vbox_junction_labeling.addLayout(hbox)
 
         # Add layouts to the overall layout
@@ -456,6 +553,8 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["run_button"].setEnabled(True)
 
         self.collection = collection
+
+        self._get_all_neighbor_combinations()
 
         # stop the loading timer
         self.loading_timer_feature_extraction.stop()
