@@ -166,7 +166,7 @@ class JunctionAnnotationWidget(QWidget):
         # default value for thickness
         self.widgets["thickness"].setMinimum(1)
         self.widgets["thickness"].setMaximum(10)
-        self.widgets["thickness"].setValue(1)
+        self.widgets["thickness"].setValue(3)
 
         # Set size policy of the widgets
         for widget in self.widgets.values():
@@ -234,10 +234,24 @@ class JunctionAnnotationWidget(QWidget):
     def save_dataset(self):
         # Specify the path and name of the file to save the dataset
         file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_junction_label.csv")
+
+        if self.neighbors_combination_list == []:
+            # should run polarityjam first
+            return
+
         self.junction_label.to_csv(file_path, index=False)
 
         # toggle visibility of the save indicator
         self.widgets["save_indicator"].setVisible(True)
+
+    def save_feature_ds(self, collection):
+        # Specify the path and name of the file to save the dataset
+        file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_features.csv")
+
+        if self.collection is None or len(self.collection) == 0:
+            return
+
+        collection.dataset.to_csv(file_path, index=False)
 
     def on_dropdown_labeling_changed(self):
         # do nothing if no collection is available
@@ -265,7 +279,7 @@ class JunctionAnnotationWidget(QWidget):
             return
 
         # decrease current index if possible
-        if self.cur_index > 1:
+        if self.cur_index > 0:
             self.cur_index -= 1
         else:
             # enable the button
@@ -302,6 +316,7 @@ class JunctionAnnotationWidget(QWidget):
 
         if len(self.neighbors_combination_list) == 0:
             # should run polarityjam first
+            self.widgets["next_button"].setEnabled(True)
             return
 
         # increase index if possible
@@ -362,7 +377,8 @@ class JunctionAnnotationWidget(QWidget):
             sc_mask_d = binary_dilation(sc_mask_d.data)
             sc_mask_n_d = binary_dilation(sc_mask_n_d.data)
         overlap = np.where(np.logical_and(sc_mask_d, sc_mask_n_d))
-        combined_mask = sc_mask.combine(sc_mask_n).to_instance_mask(1)
+        combined_mask = sc_mask.disjoin(sc_mask_n).to_instance_mask(1)
+
         # add overlap mask on top
         combined_mask.data[overlap] = 2
 
@@ -487,6 +503,9 @@ class JunctionAnnotationWidget(QWidget):
 
         # Create a RunSegmentationTask instance
         img = self.access_image()
+        if img is None:
+            return
+
         task = RunSegmentationTask(img, self.params_seg, self.params_runtime, self.params_image)
 
         # Connect the error signal to the handle_error method
@@ -506,11 +525,26 @@ class JunctionAnnotationWidget(QWidget):
 
     def handle_error(self, e):
         # This function will be called when an error occurs in the RunSegmentationTask
+        # enable the buttons again
+        self.widgets["segment_button"].setEnabled(True)
+        self.widgets["run_button"].setEnabled(True)
+
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
         msg.setText("An error occurred")
         msg.setInformativeText(str(e))
         msg.setWindowTitle("Error")
+        msg.exec_()
+
+    def show_message(self, text, inf_text):
+        self.widgets["segment_button"].setEnabled(True)
+        self.widgets["run_button"].setEnabled(True)
+
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setText(text)
+        msg.setInformativeText(inf_text)
+        msg.setWindowTitle("Information")
         msg.exec_()
 
     def handle_segmentation_result(self, mask):
@@ -534,7 +568,7 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["segment_button"].setEnabled(True)
 
     def run_polarityjam(self):
-        # Re-enable the button
+        # disable the button
         self.widgets["run_button"].setEnabled(False)
 
         # Create a QThreadPool instance
@@ -542,7 +576,13 @@ class JunctionAnnotationWidget(QWidget):
 
         # Create a RunPolarityJamTask instance
         img = self.access_image()
+        if img is None:
+            return
+
         mask = self.access_mask()
+        if mask is None:
+            return
+
         task = RunPolarityJamTask(img, mask, self.params_image, self.params_runtime, self.output_path_prefix,
                                   self.output_path)
 
@@ -564,9 +604,10 @@ class JunctionAnnotationWidget(QWidget):
     def handle_features_extraction_result(self, collection):
         # This function will be called when the RunPolarityJamTask finishes
         # The collection parameter will contain the result of the extract_features function
-        # Re-enable the button
-
         self.collection = collection
+
+        # save the collection dataset to a csv file
+        self.save_feature_ds(collection)
 
         self._get_all_neighbor_combinations()
 
@@ -597,12 +638,20 @@ class JunctionAnnotationWidget(QWidget):
 
     def access_image(self):
         image_data = None
+        num_img = 0
         for layer in self.viewer.layers:
+            # check if more than one image is present
             if isinstance(layer, napari.layers.image.image.Image):
                 image_data = layer.data
+                num_img += 1
+
+        if num_img > 1:
+            self.show_message("More than one image found in the viewer!", "Please load only one image.")
+            return
 
         if image_data is None:
-            raise ValueError("No image found in the viewer!")
+            self.show_message("No image found in the viewer!", "Please load an image.")
+            return
 
         if image_data.shape[0] < min(image_data.shape[1], image_data.shape[2]):
             img = np.swapaxes(np.swapaxes(image_data, 0, 2), 0, 1)
@@ -613,12 +662,18 @@ class JunctionAnnotationWidget(QWidget):
 
     def access_mask(self):
         mask = None
+        num_mask = 0
         for layer in self.viewer.layers:
             if isinstance(layer, napari.layers.labels.labels.Labels):
                 mask = layer.data
+                num_mask += 1
 
+        if num_mask > 1:
+            self.show_message("More than one mask found in the viewer!", "Please have only one mask loaded.")
+            return
         if mask is None:
-            raise ValueError("No mask found in the viewer!")
+            self.show_message("No mask found in the viewer!", "Please load a mask or run segmentation.")
+            return
 
         return mask
 
