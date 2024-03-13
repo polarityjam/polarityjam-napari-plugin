@@ -193,7 +193,6 @@ class JunctionAnnotationWidget(QWidget):
             ["none", "straight", "thick", "thick/reticular", "reticular", "fingers"]
         )
 
-
         # add connections
         self.widgets["param_button"].clicked.connect(self.load_parameter_file)
         self.widgets["segment_button"].clicked.connect(self.run_segmentation)
@@ -257,20 +256,29 @@ class JunctionAnnotationWidget(QWidget):
         ] = selected_item
 
     def previous_button_clicked(self):
+        # disable to disallow double clicking
+        self.widgets["previous_button"].setEnabled(False)
+
         if len(self.neighbors_combination_list) == 0:
             # should run polarityjam first
+            self.widgets["previous_button"].setEnabled(True)
             return
 
         # decrease current index if possible
         if self.cur_index > 1:
             self.cur_index -= 1
         else:
+            # enable the button
+            self.widgets["previous_button"].setEnabled(True)
             return
 
         # reset drop down menu to that of the junction_label dataframe
         self._reset_junction_box()
 
         self._show_single_junction()
+
+        # enable the button
+        self.widgets["previous_button"].setEnabled(True)
 
     def _get_all_neighbor_combinations(self):
         if not (self.collection is None or len(self.collection) == 0):
@@ -289,6 +297,9 @@ class JunctionAnnotationWidget(QWidget):
                         )
 
     def next_button_clicked(self):
+        # disable to disallow double clicking
+        self.widgets["next_button"].setEnabled(False)
+
         if len(self.neighbors_combination_list) == 0:
             # should run polarityjam first
             return
@@ -297,12 +308,16 @@ class JunctionAnnotationWidget(QWidget):
         if self.cur_index < len(self.neighbors_combination_list) - 1:
             self.cur_index += 1
         else:
+            self.widgets["next_button"].setEnabled(True)
             return
 
         # reset drop down menu to that of the junction_label dataframe
         self._reset_junction_box()
 
         self._show_single_junction()
+
+        # enable the button
+        self.widgets["next_button"].setEnabled(True)
 
     def _reset_junction_box(self):
         label, neighbor = self.neighbors_combination_list[self.cur_index]
@@ -502,9 +517,6 @@ class JunctionAnnotationWidget(QWidget):
         # This function will be called when the RunSegmentationTask finishes
         # The mask parameter will contain the result of the segment_image function
 
-        # Re-enable the button
-        self.widgets["segment_button"].setEnabled(True)
-
         # stop the loading timer
         self.loading_timer_segmentation.stop()
 
@@ -518,12 +530,15 @@ class JunctionAnnotationWidget(QWidget):
             # Set the visibility of segmentation_indicator to False
             self.widgets["segmentation_indicator"].setVisible(False)
 
+        # Re-enable the button
+        self.widgets["segment_button"].setEnabled(True)
+
     def run_polarityjam(self):
         # Re-enable the button
         self.widgets["run_button"].setEnabled(False)
 
         # Create a QThreadPool instance
-        thread_pool = QThreadPool()
+        thread_pool = QThreadPool().globalInstance()
 
         # Create a RunPolarityJamTask instance
         img = self.access_image()
@@ -550,7 +565,6 @@ class JunctionAnnotationWidget(QWidget):
         # This function will be called when the RunPolarityJamTask finishes
         # The collection parameter will contain the result of the extract_features function
         # Re-enable the button
-        self.widgets["run_button"].setEnabled(True)
 
         self.collection = collection
 
@@ -566,6 +580,8 @@ class JunctionAnnotationWidget(QWidget):
         else:
             # Set the visibility of feature_extraction_indicator to False
             self.widgets["feature_extraction_indicator"].setVisible(False)
+
+        self.widgets["run_button"].setEnabled(True)
 
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
