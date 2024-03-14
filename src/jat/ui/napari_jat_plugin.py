@@ -10,9 +10,10 @@ from PyQt5.QtCore import QThreadPool
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
     QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
+from skimage.morphology import binary_dilation
+
 from polarityjam import Extractor, PropertiesCollection, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
-from skimage.morphology import binary_dilation
 
 
 class WorkerSignalsSegmentation(QObject):
@@ -224,6 +225,7 @@ class JunctionAnnotationWidget(QWidget):
         self.neighbors_combination_list = []
         self._cells_layer_list = []
         self.junction_label = pd.DataFrame(columns=["label_1", "label_2", "junction_class"])
+        self._param_loaded = False
 
         # build layout
         self._build_layout()
@@ -502,8 +504,20 @@ class JunctionAnnotationWidget(QWidget):
         thread_pool = QThreadPool().globalInstance()
 
         # Create a RunSegmentationTask instance
-        img = self.access_image()
+        img = self.access_image("segmentation")
         if img is None:
+            return
+
+        if self.params_image.channel_junction == -1 and self.params_image.channel_nucleus == -1 and self.params_image.channel_organelle == -1 and self.params_image.channel_expression_marker == -1:
+            self.show_message(
+                "No input channels provided!", "Please provide at least one input channel.", "segmentation"
+            )
+            return
+        
+        if not self._param_loaded:
+            self.show_message(
+                "No parameter file loaded!", "Please load a parameter file first.", "segmentation"
+            )
             return
 
         task = RunSegmentationTask(img, self.params_seg, self.params_runtime, self.params_image)
@@ -536,9 +550,17 @@ class JunctionAnnotationWidget(QWidget):
         msg.setWindowTitle("Error")
         msg.exec_()
 
-    def show_message(self, text, inf_text):
+    def show_message(self, text, inf_text, call_class=None):
         self.widgets["segment_button"].setEnabled(True)
         self.widgets["run_button"].setEnabled(True)
+
+        # disable timer and change the loading image
+        if call_class == "segmentation":
+            self.loading_timer_segmentation.stop()
+            self.widgets["segmentation_indicator"].setVisible(False)
+        elif call_class == "feature":
+            self.loading_timer_feature_extraction.stop()
+            self.widgets["feature_extraction_indicator"].setVisible(False)
 
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Information)
@@ -575,11 +597,11 @@ class JunctionAnnotationWidget(QWidget):
         thread_pool = QThreadPool().globalInstance()
 
         # Create a RunPolarityJamTask instance
-        img = self.access_image()
+        img = self.access_image("feature")
         if img is None:
             return
 
-        mask = self.access_mask()
+        mask = self.access_mask("feature")
         if mask is None:
             return
 
@@ -627,6 +649,9 @@ class JunctionAnnotationWidget(QWidget):
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
         file_path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "YML Files (*.yml)")
+        if Path(file_path).suffix != ".yml":
+            return
+
         if file_path:
             print(f"Parameter file loaded: {file_path}")
 
@@ -636,7 +661,9 @@ class JunctionAnnotationWidget(QWidget):
 
         self.widgets["param_file_loaded_indicator"].setVisible(True)
 
-    def access_image(self):
+        self._param_loaded = True
+
+    def access_image(self, call_class=None):
         image_data = None
         num_img = 0
         for layer in self.viewer.layers:
@@ -646,11 +673,15 @@ class JunctionAnnotationWidget(QWidget):
                 num_img += 1
 
         if num_img > 1:
-            self.show_message("More than one image found in the viewer!", "Please load only one image.")
+            self.show_message(
+                "More than one image found in the viewer!", "Please load only one image.", call_class
+            )
             return
 
         if image_data is None:
-            self.show_message("No image found in the viewer!", "Please load an image.")
+            self.show_message(
+                "No image found in the viewer!", "Please load an image.", call_class
+            )
             return
 
         if image_data.shape[0] < min(image_data.shape[1], image_data.shape[2]):
@@ -660,7 +691,7 @@ class JunctionAnnotationWidget(QWidget):
 
         return img
 
-    def access_mask(self):
+    def access_mask(self, call_class=None):
         mask = None
         num_mask = 0
         for layer in self.viewer.layers:
@@ -669,10 +700,11 @@ class JunctionAnnotationWidget(QWidget):
                 num_mask += 1
 
         if num_mask > 1:
-            self.show_message("More than one mask found in the viewer!", "Please have only one mask loaded.")
+            self.show_message("More than one mask found in the viewer!", "Please have only one mask loaded.",
+                              call_class)
             return
         if mask is None:
-            self.show_message("No mask found in the viewer!", "Please load a mask or run segmentation.")
+            self.show_message("No mask found in the viewer!", "Please load a mask or run segmentation.", call_class)
             return
 
         return mask
