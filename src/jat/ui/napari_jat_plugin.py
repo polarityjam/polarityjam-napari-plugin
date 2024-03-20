@@ -1,3 +1,4 @@
+import glob
 import os
 from pathlib import Path
 
@@ -10,20 +11,24 @@ from PyQt5.QtCore import QThreadPool
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
     QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
-from skimage.morphology import binary_dilation
-
-from polarityjam import Extractor, PropertiesCollection, load_segmenter
+from polarityjam import Extractor, PropertiesCollection, Plotter, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
+from skimage.morphology import binary_dilation
 
 
 class WorkerSignalsSegmentation(QObject):
     finished = pyqtSignal(np.ndarray)  # Signal that will be emitted when the task finishes
-    error = pyqtSignal(Exception)
+    error = pyqtSignal(tuple)
 
 
 class WorkerSignalsExtraction(QObject):
     features_extracted = pyqtSignal(PropertiesCollection)  # Signal that will be emitted when features are extracted
-    error = pyqtSignal(Exception)
+    error = pyqtSignal(tuple)
+
+
+class WorkerSignalsPlot(QObject):
+    plot_done = pyqtSignal()  # Signal that will be emitted when the plot is done
+    error = pyqtSignal(tuple)
 
 
 class RunSegmentationTask(QRunnable):
@@ -40,7 +45,7 @@ class RunSegmentationTask(QRunnable):
         try:
             mask = self.segment_image()
         except Exception as e:
-            self.signals.error.emit(e)
+            self.signals.error.emit((e, "Segmentation"))
 
         self.signals.finished.emit(mask)
 
@@ -76,7 +81,7 @@ class RunPolarityJamTask(QRunnable):
         try:
             collection = self.extract_features()
         except Exception as e:
-            self.signals.error.emit(e)
+            self.signals.error.emit((e, "Extraction"))
             collection = PropertiesCollection()
         self.signals.features_extracted.emit(collection)
 
@@ -87,6 +92,27 @@ class RunPolarityJamTask(QRunnable):
         extractor.extract(self.img, self.params_image, self.mask, self.output_path_prefix, self.output_path, collection)
 
         return collection
+
+
+class PlotFeaturesTask(QRunnable):
+    def __init__(self, collection, params_plot):
+        super().__init__()
+        self.signals = WorkerSignalsPlot()
+        self.collection = collection
+        self.params_plot = params_plot
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            self.plot_features()
+        except Exception as e:
+            self.signals.error.emit((e, "Plot"))
+
+    def plot_features(self):
+        plotter = Plotter(self.params_plot)
+        plotter.plot_collection(self.collection)
+
+        self.signals.plot_done.emit()
 
 
 class JunctionAnnotationWidget(QWidget):
@@ -116,6 +142,7 @@ class JunctionAnnotationWidget(QWidget):
 
         self.loading_timer_feature_extraction = QTimer()
         self.loading_timer_segmentation = QTimer()
+        self.loading_timer_plot = QTimer()
 
         # qt objects
         self.widgets = {
@@ -136,8 +163,13 @@ class JunctionAnnotationWidget(QWidget):
             "param_file_loaded_indicator": QLabel(),
             "feature_extraction_indicator": QLabel(),
             "segmentation_indicator": QLabel(),
+            "plot_indicator": QLabel(),
             "segment_button": QPushButton("Segment Image"),
             "run_button": QPushButton("Run PolarityJam"),
+            "plot_button": QPushButton("Plot Features"),
+            "label_loadback": QLabel("Load plot:"),
+            "dropdown_loadback": QComboBox(),
+            "reset_button": QPushButton("Reset plots"),
 
             # Junction labeling block
             "label_jc": QLabel("Junction classification:"),
@@ -189,6 +221,9 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_path))
         self.widgets["segmentation_indicator"].setVisible(False)
 
+        self.widgets["plot_indicator"].setPixmap(QPixmap(loading_path))
+        self.widgets["plot_indicator"].setVisible(False)
+
         # Add items to the dropdown menu
         self.widgets["dropdown_labeling"].addItems(
             ["none", "straight", "thick", "thick/reticular", "reticular", "fingers"]
@@ -198,6 +233,9 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["param_button"].clicked.connect(self.load_parameter_file)
         self.widgets["segment_button"].clicked.connect(self.run_segmentation)
         self.widgets["run_button"].clicked.connect(self.run_polarityjam)
+        self.widgets["plot_button"].clicked.connect(self.run_plot)
+        self.widgets["dropdown_loadback"].currentIndexChanged.connect(self.on_dropdown_loadback_changed)
+        self.widgets["reset_button"].clicked.connect(self.reset_plots)
         self.widgets["previous_button"].clicked.connect(self.previous_button_clicked)
         self.widgets["next_button"].clicked.connect(self.next_button_clicked)
         self.widgets["dropdown_labeling"].currentIndexChanged.connect(self.on_dropdown_labeling_changed)
@@ -215,8 +253,10 @@ class JunctionAnnotationWidget(QWidget):
         # timer connection
         self.loading_timer_feature_extraction.timeout.connect(self.change_loading_image_feature_extraction)
         self.loading_timer_segmentation.timeout.connect(self.change_loading_image_segmentation)
+        self.loading_timer_plot.timeout.connect(self.change_loading_image_plot)
         self.segmentation_indicator_state = True
         self.feature_extraction_indicator_state = True
+        self.plot_indicator_state = True
 
         # other initializations
         self.cur_index = -1
@@ -229,6 +269,15 @@ class JunctionAnnotationWidget(QWidget):
 
         # build layout
         self._build_layout()
+
+    def list_png_files(self):
+        search_path = os.path.join(self.output_path, self.output_path_prefix + '*.png')
+        r_list = glob.glob(search_path)
+
+        # return only the file names without prefix
+        r_list = [os.path.basename(f).replace(self.output_path_prefix + "_", "") for f in r_list]
+        r_list = [f.replace(".png", "") for f in r_list]
+        return r_list
 
     def on_thickness_text_changed(self):
         self.overlap = int(self.widgets["thickness"].text())
@@ -254,6 +303,20 @@ class JunctionAnnotationWidget(QWidget):
             return
 
         collection.dataset.to_csv(file_path, index=False)
+
+    def on_dropdown_loadback_changed(self):
+        # do nothing if no collection is available
+        if self.collection is None or len(self.collection) == 0:
+            return
+
+        # get the selected item from the dropdown menu
+        selected_item = self.widgets["dropdown_loadback"].currentText()
+
+        # build path to the file
+        file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_{selected_item}.png")
+
+        # load the plot_image into napari
+        self.viewer.open(str(file_path))
 
     def on_dropdown_labeling_changed(self):
         # do nothing if no collection is available
@@ -438,6 +501,15 @@ class JunctionAnnotationWidget(QWidget):
         hbox.addWidget(self.widgets["run_button"], 90)
         hbox.addWidget(self.widgets["feature_extraction_indicator"], 10)
         self.vbox_run_pjam.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["plot_button"], 90)
+        hbox.addWidget(self.widgets["plot_indicator"], 10)
+        self.vbox_run_pjam.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["label_loadback"])
+        hbox.addWidget(self.widgets["dropdown_loadback"])
+        hbox.addWidget(self.widgets["reset_button"])
+        self.vbox_run_pjam.addLayout(hbox)
 
         # Junction labeling block
         self.vbox_junction_labeling.addWidget(self.widgets["label_jc"])
@@ -486,6 +558,26 @@ class JunctionAnnotationWidget(QWidget):
 
         self.segmentation_indicator_state = not self.segmentation_indicator_state
 
+    def change_loading_image_plot(self):
+        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
+        loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
+
+        if self.plot_indicator_state:
+            self.widgets["plot_indicator"].setPixmap(QPixmap(loading_v_path))
+        else:
+            self.widgets["plot_indicator"].setPixmap(QPixmap(loading_path))
+
+        self.plot_indicator_state = not self.plot_indicator_state
+
+    def reset_plots(self):
+        r_list = self.list_png_files()
+        r_list = [self.output_path_prefix + "_" + f for f in r_list]
+
+        for layer in self.viewer.layers:
+            # remove if the layer is a plot
+            if layer.name in r_list:
+                self.viewer.layers.remove(layer)
+
     def select_output_path(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Output Path")
         if dir_path:  # if user didn't cancel the dialog
@@ -513,7 +605,7 @@ class JunctionAnnotationWidget(QWidget):
                 "No input channels provided!", "Please provide at least one input channel.", "segmentation"
             )
             return
-        
+
         if not self._param_loaded:
             self.show_message(
                 "No parameter file loaded!", "Please load a parameter file first.", "segmentation"
@@ -537,11 +629,27 @@ class JunctionAnnotationWidget(QWidget):
         # start the loading timer
         self.loading_timer_segmentation.start(2000)
 
-    def handle_error(self, e):
+    def handle_error(self, t):
+        e, task_type = t
+
         # This function will be called when an error occurs in the RunSegmentationTask
         # enable the buttons again
         self.widgets["segment_button"].setEnabled(True)
         self.widgets["run_button"].setEnabled(True)
+        self.widgets["plot_button"].setEnabled(True)
+
+        # reset the loading timer
+        self.loading_timer_feature_extraction.stop()
+        self.loading_timer_segmentation.stop()
+        self.loading_timer_plot.stop()
+
+        # disable the indicator for the corresponding task
+        if task_type == "Segmentation":
+            self.widgets["segmentation_indicator"].setVisible(False)
+        elif task_type == "Extraction":
+            self.widgets["feature_extraction_indicator"].setVisible(False)
+        elif task_type == "Plot":
+            self.widgets["plot_indicator"].setVisible(False)
 
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
@@ -553,6 +661,7 @@ class JunctionAnnotationWidget(QWidget):
     def show_message(self, text, inf_text, call_class=None):
         self.widgets["segment_button"].setEnabled(True)
         self.widgets["run_button"].setEnabled(True)
+        self.widgets["plot_button"].setEnabled(True)
 
         # disable timer and change the loading image
         if call_class == "segmentation":
@@ -568,6 +677,60 @@ class JunctionAnnotationWidget(QWidget):
         msg.setInformativeText(inf_text)
         msg.setWindowTitle("Information")
         msg.exec_()
+
+    def run_plot(self):
+        self.widgets["plot_button"].setEnabled(False)
+
+        if self.collection is None or len(self.collection) == 0:
+            self.show_message("No features extracted!", "Please run PolarityJam first.")
+            return
+
+        print(self.params_plot.graphics_output_format)
+
+        if "png" not in self.params_plot.graphics_output_format:
+            self.show_message("The plugin currently only supports the png plot output format.",
+                              "Please specify 'png' as the graphics output format in your parameters file.")
+
+        # Create a QThreadPool instance
+        thread_pool = QThreadPool().globalInstance()
+
+        # Create a PlotFeaturesTask instance
+        task = PlotFeaturesTask(self.collection, self.params_plot)
+
+        # connect the features_extracted signal to the handle_features_extraction_result method
+        task.signals.plot_done.connect(self.handle_plot_done)
+
+        # Connect the error signal to the handle_error method
+        task.signals.error.connect(self.handle_error)
+
+        # Start the task
+        thread_pool.start(task)
+
+        # Set the visibility of plot_indicator to True
+        self.widgets["plot_indicator"].setVisible(True)
+
+        # start the loading timer
+        self.loading_timer_plot.start(2000)
+
+    def handle_plot_done(self):
+        # This function will be called when the PlotFeaturesTask finishes
+        # stop the loading timer
+        self.loading_timer_plot.stop()
+
+        # Change the image of feature_extraction_indicator to arrow.svg
+        arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
+        self.widgets["plot_indicator"].setPixmap(QPixmap(arrow_path))
+
+        self.widgets["plot_button"].setEnabled(True)
+
+        # change the dropdown menu
+        self.widgets["dropdown_loadback"].clear()
+
+        # get all the files in the output directory, filter for self.output_path * .png
+        plot_list = self.list_png_files()
+        self.widgets["dropdown_loadback"].currentIndexChanged.disconnect()
+        self.widgets["dropdown_loadback"].addItems(plot_list)
+        self.widgets["dropdown_loadback"].currentIndexChanged.connect(self.on_dropdown_loadback_changed)
 
     def handle_segmentation_result(self, mask):
         # This function will be called when the RunSegmentationTask finishes
@@ -649,15 +812,21 @@ class JunctionAnnotationWidget(QWidget):
     def load_parameter_file(self):
         # Open a file dialog and load a YML file
         file_path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "YML Files (*.yml)")
-        if Path(file_path).suffix != ".yml":
+
+        if not file_path:
             return
 
-        if file_path:
-            print(f"Parameter file loaded: {file_path}")
-
+        try:
+            file_path = Path(file_path).resolve(strict=True)
+        except FileNotFoundError:
+            self.show_message("File not found!", "Please select a valid file.")
+        
         self.params_runtime = RuntimeParameter.from_yml(file_path)
         self.params_plot = PlotParameter.from_yml(file_path)
         self.params_seg = SegmentationParameter.from_yml(file_path)
+
+        if file_path:
+            print(f"Parameter file loaded: {file_path}")
 
         self.widgets["param_file_loaded_indicator"].setVisible(True)
 
