@@ -1,121 +1,29 @@
 import glob
 import os
+import webbrowser
 from pathlib import Path
 
 import napari
 import numpy as np
 import pandas as pd
 import pkg_resources
-from PyQt5.QtCore import QRunnable, pyqtSlot, pyqtSignal, QObject, QTimer
 from PyQt5.QtCore import QThreadPool
+from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
     QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
-from polarityjam import Extractor, PropertiesCollection, Plotter, load_segmenter
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
 from skimage.morphology import binary_dilation
 
-
-class WorkerSignalsSegmentation(QObject):
-    finished = pyqtSignal(np.ndarray)  # Signal that will be emitted when the task finishes
-    error = pyqtSignal(tuple)
-
-
-class WorkerSignalsExtraction(QObject):
-    features_extracted = pyqtSignal(PropertiesCollection)  # Signal that will be emitted when features are extracted
-    error = pyqtSignal(tuple)
-
-
-class WorkerSignalsPlot(QObject):
-    plot_done = pyqtSignal()  # Signal that will be emitted when the plot is done
-    error = pyqtSignal(tuple)
-
-
-class RunSegmentationTask(QRunnable):
-    def __init__(self, img, params_seg, params_runtime, params_image):
-        super().__init__()
-        self.img = img
-        self.params_seg = params_seg
-        self.params_runtime = params_runtime
-        self.params_image = params_image
-        self.signals = WorkerSignalsSegmentation()
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            mask = self.segment_image()
-        except Exception as e:
-            self.signals.error.emit((e, "Segmentation"))
-
-        self.signals.finished.emit(mask)
-
-    def segment_image(self):
-        if self.params_seg is None:
-            self.params_seg = SegmentationParameter(self.params_runtime.segmentation_algorithm)
-
-        segmenter, _ = load_segmenter(self.params_runtime, self.params_seg)
-
-        img_channels, _ = segmenter.prepare(self.img, self.params_image)
-        try:
-            mask = segmenter.segment(img_channels)
-        except Exception as e:
-            self.signals.error.emit(e)
-            mask = np.NAN
-
-        return mask
-
-
-class RunPolarityJamTask(QRunnable):
-    def __init__(self, img, mask, params_image, params_runtime, output_path_prefix, output_path):
-        super().__init__()
-        self.signals = WorkerSignalsExtraction()
-        self.img = img
-        self.mask = mask
-        self.params_image = params_image
-        self.params_runtime = params_runtime
-        self.output_path_prefix = output_path_prefix
-        self.output_path = output_path
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            collection = self.extract_features()
-        except Exception as e:
-            self.signals.error.emit((e, "Extraction"))
-            collection = PropertiesCollection()
-        self.signals.features_extracted.emit(collection)
-
-    def extract_features(self):
-        collection = PropertiesCollection()
-        extractor = Extractor(self.params_runtime)
-
-        extractor.extract(self.img, self.params_image, self.mask, self.output_path_prefix, self.output_path, collection)
-
-        return collection
-
-
-class PlotFeaturesTask(QRunnable):
-    def __init__(self, collection, params_plot):
-        super().__init__()
-        self.signals = WorkerSignalsPlot()
-        self.collection = collection
-        self.params_plot = params_plot
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            self.plot_features()
-        except Exception as e:
-            self.signals.error.emit((e, "Plot"))
-
-    def plot_features(self):
-        plotter = Plotter(self.params_plot)
-        plotter.plot_collection(self.collection)
-
-        self.signals.plot_done.emit()
+from jat.model.tasks import PlotFeaturesTask, RunPolarityJamTask, RunSegmentationTask
 
 
 class JunctionAnnotationWidget(QWidget):
+
+    WEB_URL_DOCS = "https://polarityjam.readthedocs.io/en/latest/"
+    WEB_URL_APP = "http://www.polarityjam.com/"  # do not change to https
+    WEB_URL_ARTICLE = "https://doi.org/10.1101/2024.01.24.577027"
+
     def __init__(self, napari_viewer):
         super().__init__()
         self.viewer = napari_viewer
@@ -188,6 +96,11 @@ class JunctionAnnotationWidget(QWidget):
             "output_path": QPushButton("Select Output Path"),
             "output_file_prefix_label": QLabel("Output File Prefix:"),
             "output_file_prefix": QLineEdit(),
+
+            # help block
+            "docs_button": QPushButton("Docs"),
+            "web_button": QPushButton("App"),
+            "article_button": QPushButton("Article"),
         }
 
         # Set minimum and maximum values for the QSpinBox widgets
@@ -240,6 +153,9 @@ class JunctionAnnotationWidget(QWidget):
         self.widgets["next_button"].clicked.connect(self.next_button_clicked)
         self.widgets["dropdown_labeling"].currentIndexChanged.connect(self.on_dropdown_labeling_changed)
         self.widgets["save_button"].clicked.connect(self.save_dataset)
+        self.widgets["docs_button"].clicked.connect(lambda: webbrowser.open(self.WEB_URL_DOCS))
+        self.widgets["web_button"].clicked.connect(lambda: webbrowser.open(self.WEB_URL_APP))
+        self.widgets["article_button"].clicked.connect(lambda: webbrowser.open(self.WEB_URL_ARTICLE))
 
         # add connections for text changed
         self.widgets["channel_junction"].textChanged.connect(self.on_junction_text_changed)
@@ -467,6 +383,7 @@ class JunctionAnnotationWidget(QWidget):
         self.vbox_output = QVBoxLayout()
         self.vbox_run_pjam = QVBoxLayout()
         self.vbox_junction_labeling = QVBoxLayout()
+        self.vbox_help = QVBoxLayout()
 
         # Input block
         self.vbox_input.addWidget(self.widgets["label_input"])
@@ -530,11 +447,19 @@ class JunctionAnnotationWidget(QWidget):
         hbox.addWidget(self.widgets["save_indicator"], 10)
         self.vbox_junction_labeling.addLayout(hbox)
 
+        # help block
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["docs_button"])
+        hbox.addWidget(self.widgets["web_button"])
+        hbox.addWidget(self.widgets["article_button"])
+        self.vbox_help.addLayout(hbox)
+
         # Add layouts to the overall layout
         self.layout.addLayout(self.vbox_input)
         self.layout.addLayout(self.vbox_output)
         self.layout.addLayout(self.vbox_run_pjam)
         self.layout.addLayout(self.vbox_junction_labeling)
+        self.layout.addLayout(self.vbox_help)
 
     def change_loading_image_feature_extraction(self):
         loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
@@ -820,7 +745,7 @@ class JunctionAnnotationWidget(QWidget):
             file_path = Path(file_path).resolve(strict=True)
         except FileNotFoundError:
             self.show_message("File not found!", "Please select a valid file.")
-        
+
         self.params_runtime = RuntimeParameter.from_yml(file_path)
         self.params_plot = PlotParameter.from_yml(file_path)
         self.params_seg = SegmentationParameter.from_yml(file_path)
