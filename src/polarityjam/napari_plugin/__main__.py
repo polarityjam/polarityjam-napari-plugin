@@ -1,4 +1,4 @@
-from jat.startup import startup
+from polarityjam.napari_plugin.startup import startup
 
 
 def main():

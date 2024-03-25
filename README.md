@@ -1,5 +1,4 @@
-# Junction-annotator plugin for napari
-
+# polarityjam napari plugin
 
 ## Installation
 1. clone the repository
@@ -10,7 +9,7 @@ pip install -e .
 ```
 
 ## Usage
-run jat with:
-```bash
-jat
+via cmdline:
+```bash 
+polarityjam napari
 ```

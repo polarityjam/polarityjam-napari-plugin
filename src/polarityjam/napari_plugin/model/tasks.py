@@ -2,7 +2,7 @@ import numpy as np
 from PyQt5.QtCore import QRunnable, pyqtSlot
 from polarityjam import Plotter, PropertiesCollection, Extractor, SegmentationParameter, load_segmenter
 
-from jat.model.signals import WorkerSignalsPlot, WorkerSignalsExtraction, WorkerSignalsSegmentation
+from polarityjam.napari_plugin.model.signals import WorkerSignalsPlot, WorkerSignalsExtraction, WorkerSignalsSegmentation
 
 
 class PlotFeaturesTask(QRunnable):

@@ -15,14 +15,18 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineE
 from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
 from skimage.morphology import binary_dilation
 
-from jat.model.tasks import PlotFeaturesTask, RunPolarityJamTask, RunSegmentationTask
+from polarityjam.napari_plugin.model.tasks import PlotFeaturesTask, RunPolarityJamTask, RunSegmentationTask
 
 
-class JunctionAnnotationWidget(QWidget):
+class PjamNapariWidget(QWidget):
 
     WEB_URL_DOCS = "https://polarityjam.readthedocs.io/en/latest/"
     WEB_URL_APP = "http://www.polarityjam.com/"  # do not change to https
     WEB_URL_ARTICLE = "https://doi.org/10.1101/2024.01.24.577027"
+
+    PATH_TO_ARROW = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'arrow.svg')
+    PATH_TO_LOADING = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'loading.svg')
+    PATH_TO_LOADING_V = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'loading_v.svg')
 
     def __init__(self, napari_viewer):
         super().__init__()
@@ -119,22 +123,20 @@ class JunctionAnnotationWidget(QWidget):
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         # indicator for parameter file loaded
-        arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
-        self.widgets["param_file_loaded_indicator"].setPixmap(QPixmap(arrow_path))
+        self.widgets["param_file_loaded_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
         self.widgets["param_file_loaded_indicator"].setVisible(False)
 
         # indicator for saving the junction label dataset
-        self.widgets["save_indicator"].setPixmap(QPixmap(arrow_path))
+        self.widgets["save_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
         self.widgets["save_indicator"].setVisible(False)
 
-        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
-        self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_path))
+        self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
         self.widgets["feature_extraction_indicator"].setVisible(False)
 
-        self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_path))
+        self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
         self.widgets["segmentation_indicator"].setVisible(False)
 
-        self.widgets["plot_indicator"].setPixmap(QPixmap(loading_path))
+        self.widgets["plot_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
         self.widgets["plot_indicator"].setVisible(False)
 
         # Add items to the dropdown menu
@@ -462,35 +464,26 @@ class JunctionAnnotationWidget(QWidget):
         self.layout.addLayout(self.vbox_help)
 
     def change_loading_image_feature_extraction(self):
-        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
-        loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
-
         if self.feature_extraction_indicator_state:
-            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_v_path))
+            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING_V))
         else:
-            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(loading_path))
+            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
 
         self.feature_extraction_indicator_state = not self.feature_extraction_indicator_state
 
     def change_loading_image_segmentation(self):
-        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
-        loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
-
         if self.segmentation_indicator_state:
-            self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_v_path))
+            self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING_V))
         else:
-            self.widgets["segmentation_indicator"].setPixmap(QPixmap(loading_path))
+            self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
 
         self.segmentation_indicator_state = not self.segmentation_indicator_state
 
     def change_loading_image_plot(self):
-        loading_path = pkg_resources.resource_filename('jat.ui.resources', 'loading.svg')
-        loading_v_path = pkg_resources.resource_filename('jat.ui.resources', 'loading_v.svg')
-
         if self.plot_indicator_state:
-            self.widgets["plot_indicator"].setPixmap(QPixmap(loading_v_path))
+            self.widgets["plot_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING_V))
         else:
-            self.widgets["plot_indicator"].setPixmap(QPixmap(loading_path))
+            self.widgets["plot_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
 
         self.plot_indicator_state = not self.plot_indicator_state
 
@@ -643,8 +636,7 @@ class JunctionAnnotationWidget(QWidget):
         self.loading_timer_plot.stop()
 
         # Change the image of feature_extraction_indicator to arrow.svg
-        arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
-        self.widgets["plot_indicator"].setPixmap(QPixmap(arrow_path))
+        self.widgets["plot_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
 
         self.widgets["plot_button"].setEnabled(True)
 
@@ -668,8 +660,7 @@ class JunctionAnnotationWidget(QWidget):
             self.add_mask_to_viewer(mask)
 
             # Change the image of feature_extraction_indicator to arrow.svg
-            arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
-            self.widgets["segmentation_indicator"].setPixmap(QPixmap(arrow_path))
+            self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
         else:
             # Set the visibility of segmentation_indicator to False
             self.widgets["segmentation_indicator"].setVisible(False)
@@ -726,8 +717,7 @@ class JunctionAnnotationWidget(QWidget):
 
         # Change the image of feature_extraction_indicator to arrow.svg
         if len(collection) > 0:
-            arrow_path = pkg_resources.resource_filename('jat.ui.resources', 'arrow.svg')
-            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(arrow_path))
+            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
         else:
             # Set the visibility of feature_extraction_indicator to False
             self.widgets["feature_extraction_indicator"].setVisible(False)
