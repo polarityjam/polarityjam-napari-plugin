@@ -1,15 +1,9 @@
 # polarityjam napari plugin
 
-## Installation
-1. clone the repository
-2. cd into the repository
-3. install with pip:
-```bash
-pip install -e .
-```
+Start a napari instance for the feature extraction pipeline to study endothelial cell polarity, junctions and morphology.
 
-## Usage
-via cmdline:
-```bash 
-polarityjam napari
-```
+Check out our [paper](https://doi.org/10.1101/2024.01.24.577027).
+
+For installation, usage, and more read our [wiki](https://polarityjam.readthedocs.io/en/latest/).
+
+Administrators and Maintainers please look here: [admin-wiki](https://github.com/polarityjam/polarityjam/wiki)
