@@ -12,14 +12,22 @@ conda activate polarityjam
 ```
 
 Clone the Polarityjam feature extraction repository (https://github.com/polarityjam/polarityjam.git) and git checkout the dev branch.
+```bash
+cd polarityjam
+git checkout dev
+```
+Install Polarityjam from the development branch
+```bash
+pip install .
+```
 
-Then install this plugin.
+Afterwards install this plugin.
 
 ```bash
 pip install git+https://github.com/polarityjam/polarityjam-napari-plugin.git
 ```
 
-Start napari with the plugin:
+Start polarityjam with the napari plugin:
 ```bash
 polarityjam napari
 ```
