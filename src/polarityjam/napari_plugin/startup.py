@@ -12,4 +12,4 @@ def run_napari(_):
 
 
 if __name__ == "__main__":
-    run_napari()
+    run_napari("")

@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import webbrowser
 from pathlib import Path
@@ -7,22 +8,29 @@ import napari
 import numpy as np
 import pandas as pd
 import pkg_resources
+import requests
 from PyQt5.QtCore import QThreadPool
 from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
     QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
-from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
+from polarityjam.napari_plugin.model.tasks import PlotFeaturesTask, RunPolarityJamTask, RunSegmentationTask
 from skimage.morphology import binary_dilation
 
-from polarityjam.napari_plugin.model.tasks import PlotFeaturesTask, RunPolarityJamTask, RunSegmentationTask
+from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
+
+
+def fetch_urls():
+    response = requests.get('https://raw.githubusercontent.com/polarityjam/polarityjam/doc/docs/resource-links.json')
+    urls = json.loads(response.text)
+    return urls
 
 
 class PjamNapariWidget(QWidget):
-
-    WEB_URL_DOCS = "https://polarityjam.readthedocs.io/en/latest/"
-    WEB_URL_APP = "http://www.polarityjam.com/"  # do not change to https
-    WEB_URL_ARTICLE = "https://doi.org/10.1101/2024.01.24.577027"
+    urls = fetch_urls()
+    WEB_URL_DOCS = urls['WEB_URL_DOCS']
+    WEB_URL_APP = urls['WEB_URL_APP']
+    WEB_URL_ARTICLE = urls['WEB_URL_ARTICLE']
 
     PATH_TO_ARROW = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'arrow.svg')
     PATH_TO_LOADING = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'loading.svg')
