@@ -21,8 +21,16 @@ from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, 
 
 
 def fetch_urls():
-    response = requests.get('https://raw.githubusercontent.com/polarityjam/polarityjam/doc/docs/resource-links.json')
-    urls = json.loads(response.text)
+    try:
+        response = requests.get('https://raw.githubusercontent.com/polarityjam/polarityjam/doc/docs/resource-links.json')
+        urls = json.loads(response.text)
+    except:  # noqa E722
+        # default urls point to the github repository
+        return {
+            'WEB_URL_DOCS': 'https://github.com/polarityjam/polarityjam',
+            'WEB_URL_APP': 'https://github.com/polarityjam/polarityjam',
+            'WEB_URL_ARTICLE': 'https://github.com/polarityjam/polarityjam'
+        }
     return urls
 
 
