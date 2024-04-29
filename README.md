@@ -1,33 +1,9 @@
-# polarityjam napari plugin
+# Feature extraction pipeline - napari plugin
 
-Start a napari instance for the feature extraction pipeline to study endothelial cell polarity, junctions and morphology.
+The feature extraction pipeline to study endothelial cell polarity, junctions and morphology.
 
-Install Polarity-JaM from development banch. Install conda or micromamba.
+Check out our [paper](https://doi.org/10.1101/2024.01.24.577027).
 
-Create an environment with `python=3.8` named `poalrityjam`
+For installation, usage, and more read our [wiki](https://polarityjam.readthedocs.io/en/latest/).
 
-Activate the conda/micromamba environment:
-```bash
-conda activate polarityjam
-```
-
-Clone the Polarityjam feature extraction repository (https://github.com/polarityjam/polarityjam.git) and git checkout the dev branch.
-```bash
-cd polarityjam
-git checkout dev
-```
-Install Polarityjam from the development branch
-```bash
-pip install .
-```
-
-Afterwards install this plugin.
-
-```bash
-pip install git+https://github.com/polarityjam/polarityjam-napari-plugin.git
-```
-
-Start polarityjam with the napari plugin:
-```bash
-polarityjam napari
-```
+Administrators and Maintainers please look here: [admin-wiki](https://github.com/polarityjam/polarityjam/wiki)
