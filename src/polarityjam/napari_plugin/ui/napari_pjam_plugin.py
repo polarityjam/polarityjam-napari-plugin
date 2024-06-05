@@ -1,3 +1,4 @@
+"""Main module for the PolarityJam Napari plugin."""
 import glob
 import json
 import os
@@ -7,44 +8,76 @@ from pathlib import Path
 import napari
 import numpy as np
 import pandas as pd
-import pkg_resources
+import pkg_resources  # noqa: B401
 import requests
-from PyQt5.QtCore import QThreadPool
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QThreadPool, QTimer
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QGraphicsScene, QLabel, QLineEdit, QPushButton, QComboBox, \
-    QSizePolicy, QHBoxLayout, QFileDialog, QMessageBox, QSpinBox
-from polarityjam.napari_plugin.model.tasks import PlotFeaturesTask, RunPolarityJamTask, RunSegmentationTask
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QGraphicsScene,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 from skimage.morphology import binary_dilation
 
-from polarityjam import RuntimeParameter, PlotParameter, SegmentationParameter, ImageParameter
+from polarityjam import (
+    ImageParameter,
+    PlotParameter,
+    RuntimeParameter,
+    SegmentationParameter,
+)
+from polarityjam.napari_plugin.model.tasks import (
+    PlotFeaturesTask,
+    RunPolarityJamTask,
+    RunSegmentationTask,
+)
 
 
 def fetch_urls():
+    """Fetch the urls from the resource-links.json file in the repository."""
     try:
-        response = requests.get('https://raw.githubusercontent.com/polarityjam/polarityjam/doc/docs/resource-links.json')
+        response = requests.get(
+            "https://raw.githubusercontent.com/polarityjam/polarityjam/doc/docs/resource-links.json"
+        )
         urls = json.loads(response.text)
-    except:  # noqa E722
+    except BaseException:  # noqa: B036
         # default urls point to the github repository
         return {
-            'WEB_URL_DOCS': 'https://github.com/polarityjam/polarityjam',
-            'WEB_URL_APP': 'https://github.com/polarityjam/polarityjam',
-            'WEB_URL_ARTICLE': 'https://github.com/polarityjam/polarityjam'
+            "WEB_URL_DOCS": "https://github.com/polarityjam/polarityjam",
+            "WEB_URL_APP": "https://github.com/polarityjam/polarityjam",
+            "WEB_URL_ARTICLE": "https://github.com/polarityjam/polarityjam",
         }
     return urls
 
 
 class PjamNapariWidget(QWidget):
-    urls = fetch_urls()
-    WEB_URL_DOCS = urls['WEB_URL_DOCS']
-    WEB_URL_APP = urls['WEB_URL_APP']
-    WEB_URL_ARTICLE = urls['WEB_URL_ARTICLE']
+    """Main widget for the PolarityJam Napari plugin."""
 
-    PATH_TO_ARROW = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'arrow.svg')
-    PATH_TO_LOADING = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'loading.svg')
-    PATH_TO_LOADING_V = pkg_resources.resource_filename('polarityjam.napari_plugin.ui.resources', 'loading_v.svg')
+    urls = fetch_urls()
+    WEB_URL_DOCS = urls["WEB_URL_DOCS"]
+    WEB_URL_APP = urls["WEB_URL_APP"]
+    WEB_URL_ARTICLE = urls["WEB_URL_ARTICLE"]
+
+    PATH_TO_ARROW = pkg_resources.resource_filename(
+        "polarityjam.napari_plugin.ui.resources", "arrow.svg"
+    )
+    PATH_TO_LOADING = pkg_resources.resource_filename(
+        "polarityjam.napari_plugin.ui.resources", "loading.svg"
+    )
+    PATH_TO_LOADING_V = pkg_resources.resource_filename(
+        "polarityjam.napari_plugin.ui.resources", "loading_v.svg"
+    )
 
     def __init__(self, napari_viewer):
+        """Initialize the widget."""
         super().__init__()
         self.viewer = napari_viewer
         self.params_image = ImageParameter()
@@ -84,7 +117,6 @@ class PjamNapariWidget(QWidget):
             "channel_nucleus": QSpinBox(),
             "channel_organelle": QSpinBox(),
             "channel_expression_marker": QSpinBox(),
-
             # Run PolarityJam block
             "label_rp": QLabel("Polarity-Jam execution:"),
             "param_button": QPushButton("Parameter File"),
@@ -98,7 +130,6 @@ class PjamNapariWidget(QWidget):
             "label_loadback": QLabel("Load plot:"),
             "dropdown_loadback": QComboBox(),
             "reset_button": QPushButton("Reset plots"),
-
             # Junction labeling block
             "label_jc": QLabel("Junction classification:"),
             "label_jclass": QLabel("Junction Class"),
@@ -109,14 +140,12 @@ class PjamNapariWidget(QWidget):
             "thickness": QSpinBox(),
             "save_button": QPushButton("Save"),
             "save_indicator": QLabel(),
-
             # Output block
             "label_output": QLabel("Output parameters:"),
             "output_path_label": QLabel("Output Path:"),
             "output_path": QPushButton("Select Output Path"),
             "output_file_prefix_label": QLabel("Output File Prefix:"),
             "output_file_prefix": QLineEdit(),
-
             # help block
             "docs_button": QPushButton("Docs"),
             "web_button": QPushButton("App"),
@@ -124,7 +153,12 @@ class PjamNapariWidget(QWidget):
         }
 
         # Set minimum and maximum values for the QSpinBox widgets
-        for channel in ["channel_junction", "channel_nucleus", "channel_organelle", "channel_expression_marker"]:
+        for channel in [
+            "channel_junction",
+            "channel_nucleus",
+            "channel_organelle",
+            "channel_expression_marker",
+        ]:
             self.widgets[channel].setMinimum(-1)
             self.widgets[channel].setMaximum(100)
             self.widgets[channel].setValue(-1)
@@ -139,14 +173,18 @@ class PjamNapariWidget(QWidget):
             widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         # indicator for parameter file loaded
-        self.widgets["param_file_loaded_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
+        self.widgets["param_file_loaded_indicator"].setPixmap(
+            QPixmap(self.PATH_TO_ARROW)
+        )
         self.widgets["param_file_loaded_indicator"].setVisible(False)
 
         # indicator for saving the junction label dataset
         self.widgets["save_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
         self.widgets["save_indicator"].setVisible(False)
 
-        self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
+        self.widgets["feature_extraction_indicator"].setPixmap(
+            QPixmap(self.PATH_TO_LOADING)
+        )
         self.widgets["feature_extraction_indicator"].setVisible(False)
 
         self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
@@ -165,28 +203,52 @@ class PjamNapariWidget(QWidget):
         self.widgets["segment_button"].clicked.connect(self.run_segmentation)
         self.widgets["run_button"].clicked.connect(self.run_polarityjam)
         self.widgets["plot_button"].clicked.connect(self.run_plot)
-        self.widgets["dropdown_loadback"].currentIndexChanged.connect(self.on_dropdown_loadback_changed)
+        self.widgets["dropdown_loadback"].currentIndexChanged.connect(
+            self.on_dropdown_loadback_changed
+        )
         self.widgets["reset_button"].clicked.connect(self.reset_plots)
         self.widgets["previous_button"].clicked.connect(self.previous_button_clicked)
         self.widgets["next_button"].clicked.connect(self.next_button_clicked)
-        self.widgets["dropdown_labeling"].currentIndexChanged.connect(self.on_dropdown_labeling_changed)
+        self.widgets["dropdown_labeling"].currentIndexChanged.connect(
+            self.on_dropdown_labeling_changed
+        )
         self.widgets["save_button"].clicked.connect(self.save_dataset)
-        self.widgets["docs_button"].clicked.connect(lambda: webbrowser.open(self.WEB_URL_DOCS))
-        self.widgets["web_button"].clicked.connect(lambda: webbrowser.open(self.WEB_URL_APP))
-        self.widgets["article_button"].clicked.connect(lambda: webbrowser.open(self.WEB_URL_ARTICLE))
+        self.widgets["docs_button"].clicked.connect(
+            lambda: webbrowser.open(self.WEB_URL_DOCS)
+        )
+        self.widgets["web_button"].clicked.connect(
+            lambda: webbrowser.open(self.WEB_URL_APP)
+        )
+        self.widgets["article_button"].clicked.connect(
+            lambda: webbrowser.open(self.WEB_URL_ARTICLE)
+        )
 
         # add connections for text changed
-        self.widgets["channel_junction"].textChanged.connect(self.on_junction_text_changed)
-        self.widgets["channel_nucleus"].textChanged.connect(self.on_nucleus_text_changed)
-        self.widgets["channel_organelle"].textChanged.connect(self.on_organelle_text_changed)
-        self.widgets["channel_expression_marker"].textChanged.connect(self.on_expression_marker_text_changed)
+        self.widgets["channel_junction"].textChanged.connect(
+            self.on_junction_text_changed
+        )
+        self.widgets["channel_nucleus"].textChanged.connect(
+            self.on_nucleus_text_changed
+        )
+        self.widgets["channel_organelle"].textChanged.connect(
+            self.on_organelle_text_changed
+        )
+        self.widgets["channel_expression_marker"].textChanged.connect(
+            self.on_expression_marker_text_changed
+        )
         self.widgets["output_path"].clicked.connect(self.select_output_path)
-        self.widgets["output_file_prefix"].textChanged.connect(self.on_output_file_prefix_text_changed)
+        self.widgets["output_file_prefix"].textChanged.connect(
+            self.on_output_file_prefix_text_changed
+        )
         self.widgets["thickness"].textChanged.connect(self.on_thickness_text_changed)
 
         # timer connection
-        self.loading_timer_feature_extraction.timeout.connect(self.change_loading_image_feature_extraction)
-        self.loading_timer_segmentation.timeout.connect(self.change_loading_image_segmentation)
+        self.loading_timer_feature_extraction.timeout.connect(
+            self.change_loading_image_feature_extraction
+        )
+        self.loading_timer_segmentation.timeout.connect(
+            self.change_loading_image_segmentation
+        )
         self.loading_timer_plot.timeout.connect(self.change_loading_image_plot)
         self.segmentation_indicator_state = True
         self.feature_extraction_indicator_state = True
@@ -198,27 +260,37 @@ class PjamNapariWidget(QWidget):
         self.biomed_img = None
         self.neighbors_combination_list = []
         self._cells_layer_list = []
-        self.junction_label = pd.DataFrame(columns=["label_1", "label_2", "junction_class"])
+        self.junction_label = pd.DataFrame(
+            columns=["label_1", "label_2", "junction_class"]
+        )
         self._param_loaded = False
 
         # build layout
         self._build_layout()
 
     def list_png_files(self):
-        search_path = os.path.join(self.output_path, self.output_path_prefix + '*.png')
+        """List all the png files in the output directory."""
+        search_path = os.path.join(self.output_path, self.output_path_prefix + "*.png")
         r_list = glob.glob(search_path)
 
         # return only the file names without prefix
-        r_list = [os.path.basename(f).replace(self.output_path_prefix + "_", "") for f in r_list]
+        r_list = [
+            os.path.basename(f).replace(self.output_path_prefix + "_", "")
+            for f in r_list
+        ]
         r_list = [f.replace(".png", "") for f in r_list]
         return r_list
 
     def on_thickness_text_changed(self):
+        """Update the overlap value from the thickness text box."""
         self.overlap = int(self.widgets["thickness"].text())
 
     def save_dataset(self):
+        """Save the junction label dataset to a csv file."""
         # Specify the path and name of the file to save the dataset
-        file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_junction_label.csv")
+        file_path = Path(self.output_path).joinpath(
+            f"{self.output_path_prefix}_junction_label.csv"
+        )
 
         if self.neighbors_combination_list == []:
             # should run polarityjam first
@@ -230,8 +302,11 @@ class PjamNapariWidget(QWidget):
         self.widgets["save_indicator"].setVisible(True)
 
     def save_feature_ds(self, collection):
+        """Save the feature dataset to a csv file."""
         # Specify the path and name of the file to save the dataset
-        file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_features.csv")
+        file_path = Path(self.output_path).joinpath(
+            f"{self.output_path_prefix}_features.csv"
+        )
 
         if self.collection is None or len(self.collection) == 0:
             return
@@ -239,6 +314,7 @@ class PjamNapariWidget(QWidget):
         collection.dataset.to_csv(file_path, index=False)
 
     def on_dropdown_loadback_changed(self):
+        """Load the selected plot image into napari."""
         # do nothing if no collection is available
         if self.collection is None or len(self.collection) == 0:
             return
@@ -247,12 +323,15 @@ class PjamNapariWidget(QWidget):
         selected_item = self.widgets["dropdown_loadback"].currentText()
 
         # build path to the file
-        file_path = Path(self.output_path).joinpath(f"{self.output_path_prefix}_{selected_item}.png")
+        file_path = Path(self.output_path).joinpath(
+            f"{self.output_path_prefix}_{selected_item}.png"
+        )
 
         # load the plot_image into napari
         self.viewer.open(str(file_path))
 
     def on_dropdown_labeling_changed(self):
+        """Update the junction class in the junction_label dataframe."""
         # do nothing if no collection is available
         if self.collection is None or len(self.collection) == 0:
             return
@@ -264,11 +343,13 @@ class PjamNapariWidget(QWidget):
 
         # change the junction class in the junction_label dataframe
         self.junction_label.loc[
-            (self.junction_label["label_1"] == label) & (self.junction_label["label_2"] == neighbor),
-            "junction_class"
+            (self.junction_label["label_1"] == label)
+            & (self.junction_label["label_2"] == neighbor),
+            "junction_class",
         ] = selected_item
 
     def previous_button_clicked(self):
+        """Show the previous junction in the list."""
         # disable to disallow double clicking
         self.widgets["previous_button"].setEnabled(False)
 
@@ -298,18 +379,30 @@ class PjamNapariWidget(QWidget):
             self.biomed_img = self._get_biomed_img()
 
             # get all unique neighbor combinations
-            for label in self.biomed_img.segmentation.segmentation_mask_connected.get_labels():
-                neighbors = list(self.biomed_img.segmentation.neighborhood_graph_connected.neighbors(label))
+            for (
+                label
+            ) in self.biomed_img.segmentation.segmentation_mask_connected.get_labels():
+                neighbors = list(
+                    self.biomed_img.segmentation.neighborhood_graph_connected.neighbors(
+                        label
+                    )
+                )
 
                 for neighbor in neighbors:
                     if label < neighbor:
                         self.neighbors_combination_list.append((label, neighbor))
                         # add default value to the junction_label dataframe
                         self.junction_label = self.junction_label.append(
-                            {"label_1": label, "label_2": neighbor, "junction_class": "none"}, ignore_index=True
+                            {
+                                "label_1": label,
+                                "label_2": neighbor,
+                                "junction_class": "none",
+                            },
+                            ignore_index=True,
                         )
 
     def next_button_clicked(self):
+        """Show the next junction in the list."""
         # disable to disallow double clicking
         self.widgets["next_button"].setEnabled(False)
 
@@ -336,15 +429,20 @@ class PjamNapariWidget(QWidget):
     def _reset_junction_box(self):
         label, neighbor = self.neighbors_combination_list[self.cur_index]
         junction_class = self.junction_label.loc[
-            (self.junction_label["label_1"] == label) & (self.junction_label["label_2"] == neighbor),
-            "junction_class"
+            (self.junction_label["label_1"] == label)
+            & (self.junction_label["label_2"] == neighbor),
+            "junction_class",
         ].values[0]
         self.widgets["dropdown_labeling"].setCurrentText(junction_class)
 
     def _show_single_junction(self):
         label, neighbor = self.neighbors_combination_list[self.cur_index]
-        sc_mask = self.biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(label)
-        sc_mask_n = self.biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(neighbor)
+        sc_mask = self.biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(
+            label
+        )
+        sc_mask_n = self.biomed_img.segmentation.segmentation_mask_connected.get_single_instance_mask(
+            neighbor
+        )
 
         # dilate the masks and calculate overlap
         combined_mask = self.get_sc_junction_mask(sc_mask, sc_mask_n)
@@ -370,9 +468,10 @@ class PjamNapariWidget(QWidget):
         return biomed_img
 
     def get_sc_junction_mask(self, sc_mask, sc_mask_n):
+        """Get the junction mask for the given supercell masks."""
         sc_mask_d = binary_dilation(sc_mask.data)
         sc_mask_n_d = binary_dilation(sc_mask_n.data)
-        for i in range(self.overlap - 1):
+        for _ in range(self.overlap - 1):
             sc_mask_d = binary_dilation(sc_mask_d.data)
             sc_mask_n_d = binary_dilation(sc_mask_n_d.data)
         overlap = np.where(np.logical_and(sc_mask_d, sc_mask_n_d))
@@ -384,16 +483,26 @@ class PjamNapariWidget(QWidget):
         return combined_mask
 
     def on_junction_text_changed(self):
-        self.params_image.channel_junction = int(self.widgets["channel_junction"].text())
+        """Update the junction channel from the text box."""
+        self.params_image.channel_junction = int(
+            self.widgets["channel_junction"].text()
+        )
 
     def on_nucleus_text_changed(self):
+        """Update the nucleus channel from the text box."""
         self.params_image.channel_nucleus = int(self.widgets["channel_nucleus"].text())
 
     def on_organelle_text_changed(self):
-        self.params_image.channel_organelle = int(self.widgets["channel_organelle"].text())
+        """Update the organelle channel from the text box."""
+        self.params_image.channel_organelle = int(
+            self.widgets["channel_organelle"].text()
+        )
 
     def on_expression_marker_text_changed(self):
-        self.params_image.channel_expression_marker = int(self.widgets["channel_expression_marker"].text())
+        """Update the expression marker channel from the text box."""
+        self.params_image.channel_expression_marker = int(
+            self.widgets["channel_expression_marker"].text()
+        )
 
     def _build_layout(self):
         # Create block-wise layout
@@ -405,7 +514,12 @@ class PjamNapariWidget(QWidget):
 
         # Input block
         self.vbox_input.addWidget(self.widgets["label_input"])
-        for channel in ["channel_junction", "channel_nucleus", "channel_organelle", "channel_expression_marker"]:
+        for channel in [
+            "channel_junction",
+            "channel_nucleus",
+            "channel_organelle",
+            "channel_expression_marker",
+        ]:
             hbox = QHBoxLayout()
             hbox.addWidget(self.widgets[channel + "_label"], 90)
             hbox.addWidget(self.widgets[channel], 10)
@@ -446,7 +560,7 @@ class PjamNapariWidget(QWidget):
         hbox.addWidget(self.widgets["reset_button"])
         self.vbox_run_pjam.addLayout(hbox)
 
-        # Junction labeling block
+        # Junction labeling block - disabled for now
         # self.vbox_junction_labeling.addWidget(self.widgets["label_jc"])
         # hbox = QHBoxLayout()
         # hbox.addWidget(self.widgets["label_jclass"])
@@ -480,22 +594,35 @@ class PjamNapariWidget(QWidget):
         self.layout.addLayout(self.vbox_help)
 
     def change_loading_image_feature_extraction(self):
+        """Change the loading image for feature extraction."""
         if self.feature_extraction_indicator_state:
-            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING_V))
+            self.widgets["feature_extraction_indicator"].setPixmap(
+                QPixmap(self.PATH_TO_LOADING_V)
+            )
         else:
-            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
+            self.widgets["feature_extraction_indicator"].setPixmap(
+                QPixmap(self.PATH_TO_LOADING)
+            )
 
-        self.feature_extraction_indicator_state = not self.feature_extraction_indicator_state
+        self.feature_extraction_indicator_state = (
+            not self.feature_extraction_indicator_state
+        )
 
     def change_loading_image_segmentation(self):
+        """Change the loading image for segmentation."""
         if self.segmentation_indicator_state:
-            self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING_V))
+            self.widgets["segmentation_indicator"].setPixmap(
+                QPixmap(self.PATH_TO_LOADING_V)
+            )
         else:
-            self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING))
+            self.widgets["segmentation_indicator"].setPixmap(
+                QPixmap(self.PATH_TO_LOADING)
+            )
 
         self.segmentation_indicator_state = not self.segmentation_indicator_state
 
     def change_loading_image_plot(self):
+        """Change the loading image for plotting."""
         if self.plot_indicator_state:
             self.widgets["plot_indicator"].setPixmap(QPixmap(self.PATH_TO_LOADING_V))
         else:
@@ -504,6 +631,7 @@ class PjamNapariWidget(QWidget):
         self.plot_indicator_state = not self.plot_indicator_state
 
     def reset_plots(self):
+        """Remove all the plots from the viewer."""
         r_list = self.list_png_files()
         r_list = [self.output_path_prefix + "_" + f for f in r_list]
 
@@ -513,16 +641,19 @@ class PjamNapariWidget(QWidget):
                 self.viewer.layers.remove(layer)
 
     def select_output_path(self):
+        """Select the output path for the plots."""
         dir_path = QFileDialog.getExistingDirectory(self, "Select Output Path")
         if dir_path:  # if user didn't cancel the dialog
             self.output_path = dir_path
             self.widgets["output_path"].setText(f"{dir_path}")
 
     def on_output_file_prefix_text_changed(self):
+        """Update the output file prefix from the text box."""
         new_text = self.widgets["output_file_prefix"].text()
         self.output_path_prefix = new_text
 
     def run_segmentation(self):
+        """Run the segmentation task."""
         # Disable the button
         self.widgets["segment_button"].setEnabled(False)
 
@@ -534,19 +665,30 @@ class PjamNapariWidget(QWidget):
         if img is None:
             return
 
-        if self.params_image.channel_junction == -1 and self.params_image.channel_nucleus == -1 and self.params_image.channel_organelle == -1 and self.params_image.channel_expression_marker == -1:
+        if (
+            self.params_image.channel_junction == -1
+            and self.params_image.channel_nucleus == -1
+            and self.params_image.channel_organelle == -1
+            and self.params_image.channel_expression_marker == -1
+        ):
             self.show_message(
-                "No input channels provided!", "Please provide at least one input channel.", "segmentation"
+                "No input channels provided!",
+                "Please provide at least one input channel.",
+                "segmentation",
             )
             return
 
         if not self._param_loaded:
             self.show_message(
-                "No parameter file loaded!", "Please load a parameter file first.", "segmentation"
+                "No parameter file loaded!",
+                "Please load a parameter file first.",
+                "segmentation",
             )
             return
 
-        task = RunSegmentationTask(img, self.params_seg, self.params_runtime, self.params_image)
+        task = RunSegmentationTask(
+            img, self.params_seg, self.params_runtime, self.params_image
+        )
 
         # Connect the error signal to the handle_error method
         task.signals.error.connect(self.handle_error)
@@ -564,6 +706,7 @@ class PjamNapariWidget(QWidget):
         self.loading_timer_segmentation.start(2000)
 
     def handle_error(self, t):
+        """Handle any error signal."""
         e, task_type = t
 
         # This function will be called when an error occurs in the RunSegmentationTask
@@ -593,6 +736,7 @@ class PjamNapariWidget(QWidget):
         msg.exec_()
 
     def show_message(self, text, inf_text, call_class=None):
+        """Show a message box with the given text and informative text."""
         self.widgets["segment_button"].setEnabled(True)
         self.widgets["run_button"].setEnabled(True)
         self.widgets["plot_button"].setEnabled(True)
@@ -613,6 +757,7 @@ class PjamNapariWidget(QWidget):
         msg.exec_()
 
     def run_plot(self):
+        """Run the PlotFeaturesTask."""
         self.widgets["plot_button"].setEnabled(False)
 
         if self.collection is None or len(self.collection) == 0:
@@ -622,8 +767,10 @@ class PjamNapariWidget(QWidget):
         print(self.params_plot.graphics_output_format)
 
         if "png" not in self.params_plot.graphics_output_format:
-            self.show_message("The plugin currently only supports the png plot output format.",
-                              "Please specify 'png' as the graphics output format in your parameters file.")
+            self.show_message(
+                "The plugin currently only supports the png plot output format.",
+                "Please specify 'png' as the graphics output format in your parameters file.",
+            )
 
         # Create a QThreadPool instance
         thread_pool = QThreadPool().globalInstance()
@@ -647,6 +794,7 @@ class PjamNapariWidget(QWidget):
         self.loading_timer_plot.start(2000)
 
     def handle_plot_done(self):
+        """Handle the plot done signal."""
         # This function will be called when the PlotFeaturesTask finishes
         # stop the loading timer
         self.loading_timer_plot.stop()
@@ -663,20 +811,22 @@ class PjamNapariWidget(QWidget):
         plot_list = self.list_png_files()
         self.widgets["dropdown_loadback"].currentIndexChanged.disconnect()
         self.widgets["dropdown_loadback"].addItems(plot_list)
-        self.widgets["dropdown_loadback"].currentIndexChanged.connect(self.on_dropdown_loadback_changed)
+        self.widgets["dropdown_loadback"].currentIndexChanged.connect(
+            self.on_dropdown_loadback_changed
+        )
 
     def handle_segmentation_result(self, mask):
-        # This function will be called when the RunSegmentationTask finishes
-        # The mask parameter will contain the result of the segment_image function
-
+        """Handle the segmentation result."""
         # stop the loading timer
         self.loading_timer_segmentation.stop()
 
-        if mask is not np.NAN:
+        if mask.shape != ():
             self.add_mask_to_viewer(mask)
 
             # Change the image of feature_extraction_indicator to arrow.svg
-            self.widgets["segmentation_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
+            self.widgets["segmentation_indicator"].setPixmap(
+                QPixmap(self.PATH_TO_ARROW)
+            )
         else:
             # Set the visibility of segmentation_indicator to False
             self.widgets["segmentation_indicator"].setVisible(False)
@@ -685,6 +835,7 @@ class PjamNapariWidget(QWidget):
         self.widgets["segment_button"].setEnabled(True)
 
     def run_polarityjam(self):
+        """Run the PolarityJam task."""
         # disable the button
         self.widgets["run_button"].setEnabled(False)
 
@@ -700,8 +851,14 @@ class PjamNapariWidget(QWidget):
         if mask is None:
             return
 
-        task = RunPolarityJamTask(img, mask, self.params_image, self.params_runtime, self.output_path_prefix,
-                                  self.output_path)
+        task = RunPolarityJamTask(
+            img,
+            mask,
+            self.params_image,
+            self.params_runtime,
+            self.output_path_prefix,
+            self.output_path,
+        )
 
         # connect the features_extracted signal to the handle_features_extraction_result method
         task.signals.features_extracted.connect(self.handle_features_extraction_result)
@@ -719,6 +876,7 @@ class PjamNapariWidget(QWidget):
         self.loading_timer_feature_extraction.start(2000)
 
     def handle_features_extraction_result(self, collection):
+        """Handle the features extraction result."""
         # This function will be called when the RunPolarityJamTask finishes
         # The collection parameter will contain the result of the extract_features function
         self.collection = collection
@@ -733,7 +891,9 @@ class PjamNapariWidget(QWidget):
 
         # Change the image of feature_extraction_indicator to arrow.svg
         if len(collection) > 0:
-            self.widgets["feature_extraction_indicator"].setPixmap(QPixmap(self.PATH_TO_ARROW))
+            self.widgets["feature_extraction_indicator"].setPixmap(
+                QPixmap(self.PATH_TO_ARROW)
+            )
         else:
             # Set the visibility of feature_extraction_indicator to False
             self.widgets["feature_extraction_indicator"].setVisible(False)
@@ -741,8 +901,11 @@ class PjamNapariWidget(QWidget):
         self.widgets["run_button"].setEnabled(True)
 
     def load_parameter_file(self):
+        """Load a parameter file."""
         # Open a file dialog and load a YML file
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "YML Files (*.yml)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open File", "", "YML Files (*.yml)"
+        )
 
         if not file_path:
             return
@@ -764,6 +927,7 @@ class PjamNapariWidget(QWidget):
         self._param_loaded = True
 
     def access_image(self, call_class=None):
+        """Access the image from the napari viewer."""
         image_data = None
         num_img = 0
         for layer in self.viewer.layers:
@@ -774,7 +938,9 @@ class PjamNapariWidget(QWidget):
 
         if num_img > 1:
             self.show_message(
-                "More than one image found in the viewer!", "Please load only one image.", call_class
+                "More than one image found in the viewer!",
+                "Please load only one image.",
+                call_class,
             )
             return
 
@@ -792,6 +958,7 @@ class PjamNapariWidget(QWidget):
         return img
 
     def access_mask(self, call_class=None):
+        """Access the mask from the napari viewer."""
         mask = None
         num_mask = 0
         for layer in self.viewer.layers:
@@ -800,14 +967,22 @@ class PjamNapariWidget(QWidget):
                 num_mask += 1
 
         if num_mask > 1:
-            self.show_message("More than one mask found in the viewer!", "Please have only one mask loaded.",
-                              call_class)
+            self.show_message(
+                "More than one mask found in the viewer!",
+                "Please have only one mask loaded.",
+                call_class,
+            )
             return
         if mask is None:
-            self.show_message("No mask found in the viewer!", "Please load a mask or run segmentation.", call_class)
+            self.show_message(
+                "No mask found in the viewer!",
+                "Please load a mask or run segmentation.",
+                call_class,
+            )
             return
 
         return mask
 
     def add_mask_to_viewer(self, mask, name="PolarityJam Mask"):
+        """Add the mask to the napari viewer."""
         self.viewer.add_labels(mask, name=name)
