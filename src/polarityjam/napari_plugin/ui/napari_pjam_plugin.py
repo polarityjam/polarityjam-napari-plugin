@@ -8,7 +8,7 @@ from pathlib import Path
 import napari
 import numpy as np
 import pandas as pd
-import pkg_resources  # noqa: B401
+import pkg_resources
 import requests
 from PyQt5.QtCore import QThreadPool, QTimer
 from PyQt5.QtGui import QPixmap
