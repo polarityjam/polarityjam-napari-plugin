@@ -92,13 +92,14 @@ class RunPolarityJamTask(QRunnable):
 class RunSegmentationTask(QRunnable):
     """Task for running segmentation."""
 
-    def __init__(self, img, params_seg, params_runtime, params_image):
+    def __init__(self, img, params_seg, params_runtime, params_image, img_path):
         """Initialize the task."""
         super().__init__()
         self.img = img
         self.params_seg = params_seg
         self.params_runtime = params_runtime
         self.params_image = params_image
+        self.img_path = img_path
         self.signals = WorkerSignalsSegmentation()
 
     @pyqtSlot()
@@ -123,6 +124,6 @@ class RunSegmentationTask(QRunnable):
         segmenter, _ = load_segmenter(self.params_runtime, self.params_seg)
 
         img_channels, _ = segmenter.prepare(self.img, self.params_image)
-        mask = segmenter.segment(img_channels)
+        mask = segmenter.segment(img_channels, path=self.img_path)
 
         return mask
