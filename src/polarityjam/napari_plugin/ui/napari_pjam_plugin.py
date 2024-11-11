@@ -13,6 +13,7 @@ import requests
 from PyQt5.QtCore import QThreadPool, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGraphicsScene,
@@ -23,7 +24,6 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSpinBox,
-    QCheckBox,
     QVBoxLayout,
     QWidget,
 )
@@ -118,14 +118,12 @@ class PjamNapariWidget(QWidget):
             "channel_nucleus": QSpinBox(),
             "channel_organelle": QSpinBox(),
             "channel_expression_marker": QSpinBox(),
-
             # Extract options block
             "label_extract": QLabel("Extract options:"),
             "extract_morphology": QCheckBox("Morphology"),
             "extract_polarity": QCheckBox("Polarity"),
             "extract_intensity": QCheckBox("Marker"),
             "extract_topology": QCheckBox("Topology"),
-
             # Run PolarityJam block
             "label_rp": QLabel("Polarity-Jam execution:"),
             "param_button": QPushButton("Parameter File"),
@@ -155,12 +153,20 @@ class PjamNapariWidget(QWidget):
             "output_path": QPushButton("Select Output Path"),
             "output_file_prefix_label": QLabel("Output File Prefix:"),
             "output_file_prefix": QLineEdit(),
-
             # help block
             "docs_button": QPushButton("Docs"),
             "web_button": QPushButton("App"),
             "article_button": QPushButton("Article"),
         }
+
+        # Set default checked state for the checkboxes
+        for checkbox in [
+            "extract_morphology",
+            "extract_polarity",
+            "extract_intensity",
+            "extract_topology",
+        ]:
+            self.widgets[checkbox].setChecked(True)
 
         # Set minimum and maximum values for the QSpinBox widgets
         for channel in [
@@ -880,10 +886,18 @@ class PjamNapariWidget(QWidget):
             return
 
         # override the extraction options with those from GUI
-        self.params_runtime.extract_morphology_features = self.widgets["extract_morphology"].isChecked()
-        self.params_runtime.extract_polarity_features = self.widgets["extract_polarity"].isChecked()
-        self.params_runtime.extract_intensity_features = self.widgets["extract_intensity"].isChecked()
-        self.params_runtime.extract_group_features = self.widgets["extract_topology"].isChecked()
+        self.params_runtime.extract_morphology_features = self.widgets[
+            "extract_morphology"
+        ].isChecked()
+        self.params_runtime.extract_polarity_features = self.widgets[
+            "extract_polarity"
+        ].isChecked()
+        self.params_runtime.extract_intensity_features = self.widgets[
+            "extract_intensity"
+        ].isChecked()
+        self.params_runtime.extract_group_features = self.widgets[
+            "extract_topology"
+        ].isChecked()
 
         task = RunPolarityJamTask(
             img,
