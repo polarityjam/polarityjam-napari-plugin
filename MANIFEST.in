@@ -1,0 +1,1 @@
+recursive-include src/ *.txt, *.rst, *.sh, *.sql, *.json, *.png, *.ico, *.icns, *.svg, *.yml, *.csv
