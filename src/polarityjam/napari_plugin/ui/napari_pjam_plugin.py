@@ -8,7 +8,7 @@ from pathlib import Path
 import napari
 import numpy as np
 import pandas as pd
-import pkg_resources
+from importlib.resources import files
 import requests
 from PyQt5.QtCore import QThreadPool, QTimer
 from PyQt5.QtGui import QPixmap
@@ -67,15 +67,11 @@ class PjamNapariWidget(QWidget):
     WEB_URL_APP = urls["WEB_URL_APP"]
     WEB_URL_ARTICLE = urls["WEB_URL_ARTICLE"]
 
-    PATH_TO_ARROW = pkg_resources.resource_filename(
-        "polarityjam.napari_plugin.ui.resources", "arrow.svg"
-    )
-    PATH_TO_LOADING = pkg_resources.resource_filename(
-        "polarityjam.napari_plugin.ui.resources", "loading.svg"
-    )
-    PATH_TO_LOADING_V = pkg_resources.resource_filename(
-        "polarityjam.napari_plugin.ui.resources", "loading_v.svg"
-    )
+    resource_files = files("polarityjam.napari_plugin.ui.resources")
+
+    PATH_TO_ARROW = str(resource_files.joinpath("arrow.svg"))
+    PATH_TO_LOADING = str(resource_files.joinpath("loading.svg"))
+    PATH_TO_LOADING_V = str(resource_files.joinpath("loading_v.svg"))
 
     def __init__(self, napari_viewer):
         """Initialize the widget."""

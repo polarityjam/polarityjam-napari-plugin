@@ -15,11 +15,15 @@ We use the following:
 - `Security` in case of vulnerabilities.
 
 ## [Unreleased]
+
 ## [0.2.0] 
 
 ### Added
 - feature extraction by category
+
+### Changed
 - pyproject.toml for packaging 
+- replace deprecated pkg_resources with importlib.metadata
 
 
 ## [0.1.1] - 2024-06-05
