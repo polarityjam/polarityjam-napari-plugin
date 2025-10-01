@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polarityjam-napari-plugin"
+version = "0.2.0"
+authors = [
+  {name = "Jan Philipp Albrecht", email = "j.p.albrecht@fu-berlin.de"},
+    {name = "Wolfgang Giese", email = "wolfgang.giese@mdc-berlin.de"}
+]
+description = "polarityjam napari plugin"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["vascular cell", "imaging", "data analysis", "polarity"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Utilities"
+]
+requires-python = "~=3.10"
+dependencies = [
+    "polarityjam>=0.4.0,<0.5.0",
+    "napari[all]"
+]
+
+[project.urls]
+Documentation = "https://polarityjam.readthedocs.io"
+Homepage = "https://www.polarityjam.com"
+DeveloperDocumentation = "https://github.com/polarityjam/polarityjam/wiki"
+Repository = "https://github.com/polarityjam/polarityjam-napari-plugin.git"
+Tracker= "https://github.com/polarityjam/polarityjam-napari-plugin.git/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.entry-points."console_parsers_polarityjam"]
+napari="polarityjam.napari_plugin.argument_parsing:create_parser_napari"
+
+[tool.flake8]
+max-line-length = 120

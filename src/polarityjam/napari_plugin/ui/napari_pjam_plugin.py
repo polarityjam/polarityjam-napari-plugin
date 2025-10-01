@@ -8,11 +8,12 @@ from pathlib import Path
 import napari
 import numpy as np
 import pandas as pd
-import pkg_resources
+from importlib.resources import files
 import requests
 from PyQt5.QtCore import QThreadPool, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGraphicsScene,
@@ -66,15 +67,11 @@ class PjamNapariWidget(QWidget):
     WEB_URL_APP = urls["WEB_URL_APP"]
     WEB_URL_ARTICLE = urls["WEB_URL_ARTICLE"]
 
-    PATH_TO_ARROW = pkg_resources.resource_filename(
-        "polarityjam.napari_plugin.ui.resources", "arrow.svg"
-    )
-    PATH_TO_LOADING = pkg_resources.resource_filename(
-        "polarityjam.napari_plugin.ui.resources", "loading.svg"
-    )
-    PATH_TO_LOADING_V = pkg_resources.resource_filename(
-        "polarityjam.napari_plugin.ui.resources", "loading_v.svg"
-    )
+    resource_files = files("polarityjam.napari_plugin.ui.resources")
+
+    PATH_TO_ARROW = str(resource_files.joinpath("arrow.svg"))
+    PATH_TO_LOADING = str(resource_files.joinpath("loading.svg"))
+    PATH_TO_LOADING_V = str(resource_files.joinpath("loading_v.svg"))
 
     def __init__(self, napari_viewer):
         """Initialize the widget."""
@@ -117,6 +114,12 @@ class PjamNapariWidget(QWidget):
             "channel_nucleus": QSpinBox(),
             "channel_organelle": QSpinBox(),
             "channel_expression_marker": QSpinBox(),
+            # Extract options block
+            "label_extract": QLabel("Extract options:"),
+            "extract_morphology": QCheckBox("Morphology"),
+            "extract_polarity": QCheckBox("Polarity"),
+            "extract_intensity": QCheckBox("Marker"),
+            "extract_topology": QCheckBox("Topology"),
             # Run PolarityJam block
             "label_rp": QLabel("Polarity-Jam execution:"),
             "param_button": QPushButton("Parameter File"),
@@ -151,6 +154,15 @@ class PjamNapariWidget(QWidget):
             "web_button": QPushButton("App"),
             "article_button": QPushButton("Article"),
         }
+
+        # Set default checked state for the checkboxes
+        for checkbox in [
+            "extract_morphology",
+            "extract_polarity",
+            "extract_intensity",
+            "extract_topology",
+        ]:
+            self.widgets[checkbox].setChecked(True)
 
         # Set minimum and maximum values for the QSpinBox widgets
         for channel in [
@@ -301,16 +313,20 @@ class PjamNapariWidget(QWidget):
         # toggle visibility of the save indicator
         self.widgets["save_indicator"].setVisible(True)
 
-    def save_feature_ds(self, collection):
+    def save_feature_and_collection(self, collection):
         """Save the feature dataset to a csv file."""
         # Specify the path and name of the file to save the dataset
         file_path = Path(self.output_path).joinpath(
             f"{self.output_path_prefix}_features.csv"
         )
+        collection_path = Path(self.output_path).joinpath(
+            f"{self.output_path_prefix}_collection.pkl"
+        )
 
         if self.collection is None or len(self.collection) == 0:
             return
 
+        collection.save(collection_path)
         collection.dataset.to_csv(file_path, index=False)
 
     def on_dropdown_loadback_changed(self):
@@ -507,6 +523,7 @@ class PjamNapariWidget(QWidget):
     def _build_layout(self):
         # Create block-wise layout
         self.vbox_input = QVBoxLayout()
+        self.vbox_extraction = QVBoxLayout()
         self.vbox_output = QVBoxLayout()
         self.vbox_run_pjam = QVBoxLayout()
         self.vbox_junction_labeling = QVBoxLayout()
@@ -524,6 +541,17 @@ class PjamNapariWidget(QWidget):
             hbox.addWidget(self.widgets[channel + "_label"], 90)
             hbox.addWidget(self.widgets[channel], 10)
             self.vbox_input.addLayout(hbox)
+
+        # Extract options block
+        self.vbox_extraction.addWidget(self.widgets["label_extract"])
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["extract_morphology"])
+        hbox.addWidget(self.widgets["extract_polarity"])
+        self.vbox_extraction.addLayout(hbox)
+        hbox = QHBoxLayout()
+        hbox.addWidget(self.widgets["extract_intensity"])
+        hbox.addWidget(self.widgets["extract_topology"])
+        self.vbox_extraction.addLayout(hbox)
 
         # Output block
         self.vbox_output.addWidget(self.widgets["label_output"])
@@ -588,6 +616,7 @@ class PjamNapariWidget(QWidget):
 
         # Add layouts to the overall layout
         self.layout.addLayout(self.vbox_input)
+        self.layout.addLayout(self.vbox_extraction)
         self.layout.addLayout(self.vbox_output)
         self.layout.addLayout(self.vbox_run_pjam)
         self.layout.addLayout(self.vbox_junction_labeling)
@@ -661,7 +690,8 @@ class PjamNapariWidget(QWidget):
         thread_pool = QThreadPool().globalInstance()
 
         # Create a RunSegmentationTask instance
-        img = self.access_image("segmentation")
+        img, img_path = self.access_image("segmentation")
+
         if img is None:
             return
 
@@ -687,7 +717,7 @@ class PjamNapariWidget(QWidget):
             return
 
         task = RunSegmentationTask(
-            img, self.params_seg, self.params_runtime, self.params_image
+            img, self.params_seg, self.params_runtime, self.params_image, img_path
         )
 
         # Connect the error signal to the handle_error method
@@ -843,13 +873,27 @@ class PjamNapariWidget(QWidget):
         thread_pool = QThreadPool().globalInstance()
 
         # Create a RunPolarityJamTask instance
-        img = self.access_image("feature")
+        img, _ = self.access_image("feature")
         if img is None:
             return
 
         mask = self.access_mask("feature")
         if mask is None:
             return
+
+        # override the extraction options with those from GUI
+        self.params_runtime.extract_morphology_features = self.widgets[
+            "extract_morphology"
+        ].isChecked()
+        self.params_runtime.extract_polarity_features = self.widgets[
+            "extract_polarity"
+        ].isChecked()
+        self.params_runtime.extract_intensity_features = self.widgets[
+            "extract_intensity"
+        ].isChecked()
+        self.params_runtime.extract_group_features = self.widgets[
+            "extract_topology"
+        ].isChecked()
 
         task = RunPolarityJamTask(
             img,
@@ -882,7 +926,7 @@ class PjamNapariWidget(QWidget):
         self.collection = collection
 
         # save the collection dataset to a csv file
-        self.save_feature_ds(collection)
+        self.save_feature_and_collection(collection)
 
         self._get_all_neighbor_combinations()
 
@@ -934,6 +978,7 @@ class PjamNapariWidget(QWidget):
             # check if more than one image is present
             if isinstance(layer, napari.layers.image.image.Image):
                 image_data = layer.data
+                image_path = layer.source.path
                 num_img += 1
 
         if num_img > 1:
@@ -955,7 +1000,7 @@ class PjamNapariWidget(QWidget):
         else:
             img = image_data
 
-        return img
+        return img, image_path
 
     def access_mask(self, call_class=None):
         """Access the mask from the napari viewer."""
